@@ -1,0 +1,15 @@
+[package]
+name = "cache-ninja"
+version = "0.1.0"
+authors = ["Andrei Tatar <andrei.tatar@vu.nl>"]
+edition = "2018"
+
+[features]
+default = ["nol1hit"]
+isnprio = [] # Whether to prioritize isn fetches over data loads (all else equal)
+nohit = [] # Do not consider cache hits for eviction
+nol1hit = [] # (H2S only) do not consider hits on L1 entries
+
+[dependencies]
+pathfinding = "2.1.1"
+itertools = "0.10.0"
