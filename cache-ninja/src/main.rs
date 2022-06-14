@@ -7,13 +7,13 @@ use crate::policy::{CacheRP, Access, Origin};
 
 
 fn kickout<T: CacheState, R: CacheRP<State=T>>(t: &T, rp: &R) -> Vec<(Access, T)> {
-    //let sres = pathfinding::prelude::bfs(t, |x| rp.successors(x), |x| !x.contains(Entry::T)).unwrap();
+    let sres = pathfinding::prelude::bfs(t, |x| rp.successors(x), |x| !x.contains(Entry::T)).unwrap();
 
     //let (sres, total) = pathfinding::prelude::dijkstra(t, |x| rp.successors_priced(x), |x| !x.contains(Entry::T)).unwrap();
     //println!("[Dijkstra] total cost: {}", total);
 
-    let (sres, total) = pathfinding::prelude::astar(t, |x| rp.successors_priced(x), |x| rp.heur(x, Entry::T), |x| !x.contains(Entry::T)).unwrap();
-    println!("[A*] total cost: {}", total);
+    //let (sres, total) = pathfinding::prelude::astar(t, |x| rp.successors_priced(x), |x| rp.heur(x, Entry::T), |x| !x.contains(Entry::T)).unwrap();
+    //println!("[A*] total cost: {}", total);
 
     //let (sres, total) = pathfinding::prelude::fringe(t, |x| rp.successors_priced(x), |x| rp.heur(x, Entry::T), |x| !x.contains(Entry::T)).unwrap();
     //println!("[Fringe] total cost: {}", total);
@@ -159,25 +159,56 @@ fn kickdbl<T: CacheState, R: CacheRP<State=T>>(t: &T, rp: &R, maxrnds: usize) {
 }
 
 
-fn main() {
-    const MAXROUNDS: usize = 100;
+const MAXROUNDS: usize = 100;
 
+
+fn do_tree_plru4() {
+    use crate::policy::PVRP;
+    let rp = PVRP::PLRU4;
+    let st = rp.newpv();
+    kickrnd(&st, &rp, MAXROUNDS, Default::default());
+}
+
+fn do_kaby_tlb() {
     use crate::preset::*;
+    let pres = TLB::KABYLAKE;
+    let rp = pres.rp();
+    let st = pres.newstate();
+    kickrnd(&st, &rp, MAXROUNDS, Default::default());
+}
+
+fn do_kaby_set_pair() {
+    use crate::preset::*;
+    let pres = TLB::KABYLAKE;
+    let rp = pres.rp();
+    let st = pres.newstate();
+    kickdbl(&st, &rp, MAXROUNDS);
+}
+
+
+fn main() {
     println!("Cache replacement policy simulator");
 
     //let pres = TLB::IVYBRIDGE;
     //let pres = TLB::HASWELL;
-    let pres = TLB::KABYLAKE;
+    //let pres = TLB::KABYLAKE;
     //let pres = dcache::NEHALEM;
     //let pres = dcache::HASWELL;
     //let pres = dcache::KABYLAKE;
 
-    let rp = pres.rp();
+    //let rp = pres.rp();
     //let rp = pres.rpx().unwrap();
-    let st = pres.newstate();
+    //let st = pres.newstate();
 
-    kickrnd(&st, &rp, MAXROUNDS, Default::default());
+    //kickrnd(&st, &rp, MAXROUNDS, Default::default());
     //kickrnd(&st, &rp, MAXROUNDS, Origin{isnfetch: true});
 
     //kickdbl(&st, &rp, MAXROUNDS);
+
+    println!("====================\n\n TREE-PLRU4\n\n====================");
+    do_tree_plru4();
+    println!("====================\n\n KABY LAKE TLB\n\n====================");
+    do_kaby_tlb();
+    println!("====================\n\n KABY LAKE L1+L2\n\n====================");
+    do_kaby_set_pair();
 }

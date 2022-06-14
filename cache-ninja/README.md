@@ -1,8 +1,7 @@
 # Cache Ninja
 
 A Rust application to model CPU cache and TLB behavior using graph algorithms.
-
-Used to generate superoptimal TLB eviction sets in [TLB;DR](https://vusec.net/tlbdr).
+Used to generate optimized TLB eviction sets as part of [TLB;DR](https://vusec.net/tlbdr).
 
 ## Getting Started
 
@@ -32,4 +31,6 @@ The `preset` module includes reverse-engineered profiles for the TLBs and data c
 ### Compile-time Features
 (enable with `cargo [build|run] --features FEATURE[,FEATURE,...]`)
 
-* `isnprio` -- whether to prioritize instruction fetches over data loads when all else is equal (_default_: **no**)
+* `nol1hit` — do not consider L1 hits when exploring (only applies to `H2SRP` policies; _default_: **yes**)
+* `isnprio` — prioritize instruction fetches over data loads when all else is equal (_default_: **no**)
+* `nohit` — do not consider cache hits when exploring (_default_: **no**)
