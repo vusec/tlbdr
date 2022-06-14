@@ -1,0 +1,364 @@
+diff --git a/Makefile b/Makefile
+index 1b60626..fc70639 100644
+--- a/Makefile
++++ b/Makefile
+@@ -54,6 +54,8 @@ obj-y += source/profile.o
+ obj-y += source/shuffle.o
+ obj-y += source/solver.o
+ 
++obj-y += source/tlbdr.o
++
+ anc-obj-y += source/anc.o
+ 
+ revanc-obj-y += source/revanc.o
+diff --git a/include/cache.h b/include/cache.h
+index 7106ce7..77c0084 100644
+--- a/include/cache.h
++++ b/include/cache.h
+@@ -20,5 +20,3 @@ struct cache {
+ struct cache *new_cache(struct page_format *fmt, void *target,
+ 	size_t cache_size, size_t line_size);
+ void del_cache(struct cache *cache);
+-void evict_cache_line(struct cache *cache, size_t table_size,
+-	size_t cache_line, size_t page_level);
+diff --git a/include/tlbdr.h b/include/tlbdr.h
+new file mode 100644
+index 0000000..7e42cee
+--- /dev/null
++++ b/include/tlbdr.h
+@@ -0,0 +1,29 @@
++#pragma once
++
++#include <stddef.h>
++
++#define TLBDR_NJINIT (10)
++#define TLBDR_NJSTEP (4)
++#define TLBDR_NSETS (128)
++
++extern void *njbuf;
++extern void **njhead;
++
++
++static inline
++void **aschase(void **head, size_t nsteps)
++{
++	void **p = head;
++	for (size_t j = nsteps; j-- > 0;) {
++		for (int i = TLBDR_NSETS; i-- > 0;) {
++			p = *p;
++		}
++	}
++	return p;
++}
++
++static inline void **njinit(void) { return aschase(njhead, TLBDR_NJINIT); }
++static inline void **njstep(void **njp) { return aschase(njp, TLBDR_NJSTEP); }
++
++int init_nj(void);
++void tlb_evrun(void *base);
+diff --git a/scripts/config b/scripts/config
+index 606e168..84e21fb 100644
+--- a/scripts/config
++++ b/scripts/config
+@@ -1,2 +1,3 @@
+ CONFIG_USE_RDTSCP=y
+ CONFIG_USE_RDTSC=n
++CONFIG_USE_NINJA=n
+diff --git a/source/anc.c b/source/anc.c
+index 5563378..7a886c5 100644
+--- a/source/anc.c
++++ b/source/anc.c
+@@ -21,6 +21,8 @@
+ #include "macros.h"
+ #include "path.h"
+ 
++#include "tlbdr.h"
++
+ #if defined(__i386__) || defined(__x86_64__)
+ #include <cpuid/cache.h>
+ #include <cpuid/cpuid.h>
+@@ -81,11 +83,6 @@ int main(int argc, const char *argv[])
+ 		return -1;
+ 	}
+ 
+-	if (mkpath(args.output) < 0) {
+-		fprintf(stderr, "error: unable to create output directory on path '%s'!\n", args.output);
+-		return -1;
+-	}
+-
+ 	print_args(stdout, &args, page_format);
+ 
+ 	if (init_profiler() < 0) {
+@@ -108,6 +105,13 @@ int main(int argc, const char *argv[])
+ 		goto err_del_buffer;
+ 	}
+ 
++#if CONFIG_USE_NINJA
++	if (init_nj()) {
++		dprintf("unable to allocate the ninja buffer.\n");
++		goto err_del_buffer;
++	}
++#endif
++
+ #if defined(__i386__) || defined(__x86_64__)
+ 	printf("Detected CPU name: %s\n\n", cpuid_get_cpu_name());
+ #endif
+diff --git a/source/profile.c b/source/profile.c
+index 96da3a6..ffe51d0 100644
+--- a/source/profile.c
++++ b/source/profile.c
+@@ -18,6 +18,8 @@
+ #include "shuffle.h"
+ #include "solver.h"
+ 
++#include "tlbdr.h"
++
+ #define PRIxPTR_WIDTH ((int)(2 * sizeof(uintptr_t)))
+ 
+ static pthread_t timer_thread;
+@@ -98,8 +100,9 @@ uint64_t profile_access(volatile char *p)
+ 	return now - past;
+ }
+ 
+-void evict_cache_line(struct cache *cache, size_t table_size,
+-	size_t cache_line, size_t page_level)
++static
++void **evict_cache_line(struct cache *cache, size_t table_size,
++	size_t cache_line, size_t page_level, void **njp)
+ {
+ 	struct page_format *fmt = cache->fmt;
+ 	struct page_level *level;
+@@ -113,7 +116,12 @@ void evict_cache_line(struct cache *cache, size_t table_size,
+ 	}
+ 
+ 	/* Flush the TLBs and page structure caches. */
++#if CONFIG_USE_NINJA
++	njp = njstep(njp);
++	for (j = 1, level = &fmt->levels[1]; j <= page_level; ++level, ++j) {
++#else
+ 	for (j = 0, level = fmt->levels; j <= page_level; ++level, ++j) {
++#endif
+ 		stride = max(level->page_size, table_size);
+ 		p = cache->data + cache_line * cache->line_size;
+ 
+@@ -122,6 +130,8 @@ void evict_cache_line(struct cache *cache, size_t table_size,
+ 			p += stride;
+ 		}
+ 	}
++
++	return njp;
+ }
+ 
+ static void profile_cache_lines(uint64_t *timings, struct cache *cache,
+@@ -132,6 +142,12 @@ static void profile_cache_lines(uint64_t *timings, struct cache *cache,
+ 	uint64_t timing;
+ 	size_t cache_line;
+ 	size_t i, j;
++	void **njp;
++
++#if CONFIG_USE_NINJA // TLB;DR init code goes here
++	tlb_evrun(cache->data);
++	njp = njinit();
++#endif
+ 
+ 	for (i = 0; i < ncache_lines; ++i) {
+ 		cache_line = cache_lines[i];
+@@ -141,7 +157,7 @@ static void profile_cache_lines(uint64_t *timings, struct cache *cache,
+ 			timing = UINT64_MAX;
+ 
+ 			while (timing >= 1000) {
+-				evict_cache_line(cache, level->table_size, cache_line, page_level);
++				njp = evict_cache_line(cache, level->table_size, cache_line, page_level, njp);
+ 				timing = profile_access(p);
+ 			}
+ 
+@@ -269,16 +285,8 @@ unsigned profile_page_tables(
+ 	size_t stride = 0;
+ 	size_t i;
+ 	size_t expected_slot, expected_page, expected_line;
+-	FILE *fsolutions;
+-	FILE *freference;
+ 	unsigned slot_errors = 0;
+ 
+-	if (!(fsolutions = fopenf("%s/%zu-solutions.csv", "w", output_dir, run)))
+-		return 0;
+-
+-	if (!(freference = fopenf("%s/%zu-reference.csv", "w", output_dir, run)))
+-		goto err_close_solutions;
+-
+ 	printf("level\tbest line\tbest page\tslot\texpected\tva\n");
+ 
+ 	for (i = 0, level = fmt->levels; i < fmt->nlevels; ++i, ++level) {
+@@ -301,7 +309,6 @@ unsigned profile_page_tables(
+ 			nrounds, target, stride);
+ 		filter_signals(timings, fmt, target, level->npages, ncache_lines,
+ 			npages_per_line, i);
+-		save_timings(timings, level, i, ncache_lines, run, output_dir);
+ 		normalise_timings(ntimings, timings, ncache_lines, level->npages);
+ 		solve_lines(&line, &page, ntimings, ncache_lines, level->npages,
+ 			npages_per_line);
+@@ -323,20 +330,10 @@ unsigned profile_page_tables(
+ 			slot, expected_slot, PRIxPTR_WIDTH, va, slot == expected_slot ? "OK" : "!!");
+ 		fflush(stdout);
+ 
+-		fprintf(fsolutions, "%zu %zu %zu\n", npages_per_line, line, page);
+-		fprintf(freference, "%zu %zu %zu\n", npages_per_line, expected_line, expected_page);
+-
+ 		free(ntimings);
+ 		free(timings);
+ 	}
+ 
+-	fclose(fsolutions);
+-	fclose(freference);
+-
+ 	printf("Guessed VA: %p\n", (void *)va);
+ 	return slot_errors;
+-
+-err_close_solutions:
+-	fclose(fsolutions);
+-	return 0;
+ }
+diff --git a/source/revanc.c b/source/revanc.c
+index b29918a..96593f6 100644
+--- a/source/revanc.c
++++ b/source/revanc.c
+@@ -23,6 +23,8 @@
+ #include "macros.h"
+ #include "path.h"
+ 
++#include "tlbdr.h"
++
+ #if defined(__i386__) || defined(__x86_64__)
+ #include <cpuid/cache.h>
+ #include <cpuid/cpuid.h>
+@@ -204,6 +206,13 @@ int main(int argc, const char *argv[])
+ 		return -1;
+ 	}
+ 
++#if CONFIG_USE_NINJA
++	if (init_nj()) {
++		dprintf("unable to allocate the ninja buffer.\n");
++		return -1;
++	}
++#endif
++
+ #if defined(__i386__) || defined(__x86_64__)
+ 	printf("Detected CPU name: %s (%s)\n\n", cpuid_get_cpu_name(), cpuid_get_cpu_model());
+ #endif
+diff --git a/source/tlbdr.c b/source/tlbdr.c
+new file mode 100644
+index 0000000..8608edc
+--- /dev/null
++++ b/source/tlbdr.c
+@@ -0,0 +1,111 @@
++#include "tlbdr.h"
++
++#include <stdint.h>
++
++#include <sys/mman.h>
++
++#define PAGESZ (4096)
++
++#define TLB_NWAYS (12)
++#define ASC_STRIDE (512)
++#define ASC_LSET (TLBDR_NSETS-1)
++#define ASC_DIST (TLBDR_NSETS*PAGESZ)
++
++#define NJBUFSZ (TLBDR_NSETS * (TLBDR_NSETS+1) * PAGESZ)
++
++
++static void rec_track(void **start, void **next)
++{
++	void **p = start;
++	for (int i = ASC_LSET; i-- > 0; p += ASC_STRIDE) {
++		*p = p + ASC_STRIDE;
++	}
++	*p = next;
++}
++
++static inline void *alignup(void *base)
++{
++	return (void *)(((uintptr_t)base + (ASC_DIST - 1)) & -(intptr_t)ASC_DIST);
++}
++
++static void **tlb_prepninjall(void *base)
++{
++	/* Align base to first TLB colour */
++	char *p = alignup(base);
++	void **ev[9];
++	for (int i = 0; i < 9; i++) {
++		ev[i] = (void **)p;
++		p += ASC_DIST;
++	}
++	rec_track(&ev[0][0], &ev[1][0]);
++	rec_track(&ev[0][1], &ev[2][1]);
++	rec_track(&ev[0][2], &ev[2][2]);
++	rec_track(&ev[0][3], &ev[8][0]);
++	rec_track(&ev[0][4], &ev[2][4]);
++	rec_track(&ev[0][5], &ev[4][2]);
++
++	rec_track(&ev[1][0], &ev[2][0]);
++	rec_track(&ev[1][1], &ev[6][0]);
++	rec_track(&ev[1][2], &ev[0][3]);
++	rec_track(&ev[1][3], &ev[5][1]);
++	rec_track(&ev[1][4], &ev[0][5]);
++	rec_track(&ev[1][5], &ev[6][0]);
++
++	rec_track(&ev[2][0], &ev[3][0]);
++	rec_track(&ev[2][1], &ev[1][1]);
++	rec_track(&ev[2][2], &ev[7][0]);
++	rec_track(&ev[2][3], &ev[1][3]);
++	rec_track(&ev[2][4], &ev[3][2]);
++	rec_track(&ev[2][5], &ev[1][5]);
++
++	rec_track(&ev[3][0], &ev[4][0]);
++	rec_track(&ev[3][1], &ev[0][2]);
++	rec_track(&ev[3][2], &ev[8][1]);
++
++	rec_track(&ev[4][0], &ev[5][0]);
++	rec_track(&ev[4][1], &ev[1][2]);
++	rec_track(&ev[4][2], &ev[5][2]);
++
++	rec_track(&ev[5][0], &ev[0][1]);
++	rec_track(&ev[5][1], &ev[7][1]);
++	rec_track(&ev[5][2], &ev[2][1]);
++
++	rec_track(&ev[6][0], &ev[3][1]);
++	rec_track(&ev[6][1], &ev[2][3]);
++
++	rec_track(&ev[7][0], &ev[4][1]);
++	rec_track(&ev[7][1], &ev[0][4]);
++
++	rec_track(&ev[8][0], &ev[6][1]);
++	rec_track(&ev[8][1], &ev[1][4]);
++
++	return ev[0];
++}
++
++
++void *njbuf;
++void **njhead;
++
++
++int init_nj(void)
++{
++	void *b = mmap(NULL, NJBUFSZ, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS|MAP_POPULATE, -1, 0);
++	if (b == MAP_FAILED) {
++		return 1;
++	}
++	njbuf = b;
++	njhead = tlb_prepninjall(b);
++	return 0;
++}
++
++
++void tlb_evrun(void *base)
++{
++	char *p = alignup(base);
++	for (int i = TLBDR_NSETS*TLB_NWAYS; i-- > 0;) {
++		(void)*(volatile char *)p;
++		p += PAGESZ;
++	}
++}
++
++/* End TLB madness */
