@@ -481,7 +481,7 @@ static void **cache_prepnaive(void *base, uintptr_t targ)
 	for (int i = 0; i < CACHE_PREPSZ - 1; i++) {
 		*(ev[i]) = ev[i+1];
 	}
-	*(ev[TLB_PREPSZ-1]) = ev[0];
+	*(ev[CACHE_PREPSZ-1]) = ev[0];
 
 	return ev[0];
 }
@@ -511,7 +511,7 @@ static void **cache_prepnotlb(void *base, uintptr_t targ, uintptr_t tt1, uintptr
 	for (int i = 0; i < CACHE_PREPSZ - 1; i++) {
 		*(ev[i]) = ev[i+1];
 	}
-	*(ev[TLB_PREPSZ-1]) = ev[0];
+	*(ev[CACHE_PREPSZ-1]) = ev[0];
 
 	return ev[0];
 }
@@ -620,7 +620,7 @@ static inline void hamham(void *a1, void *a2)
 	asm volatile ("lfence");
 }
 
-#define REPS (250)
+#define REPS (4)
 //#define CLFLUSH(a) asm volatile ("lfence\nmfence\nclflushopt (%0)" :: "r" (a))
 #define CLFLUSH(a) asm volatile ("lfence\nsfence\nmfence\nclflush (%0)\nlfence\nsfence\nmfence" :: "r" (a))
 
