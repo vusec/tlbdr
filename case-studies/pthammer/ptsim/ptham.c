@@ -27,7 +27,7 @@ static inline uintptr_t pteaddr(void *addr, unsigned long pmd)
 
 #define CHLINE(x) ((x) >> 6)
 
-#define L3SLMASK (3)
+#define L3SLMASK (7)
 static int l3slice(uintptr_t p)
 {
 	int s0 = xbs64(p & 0x1b5f575440);
@@ -40,7 +40,7 @@ static inline uintptr_t CL1(uintptr_t pa) {return CHLINE(pa) & 0x3f;}
 static inline uintptr_t CL2(uintptr_t pa) {return CHLINE(pa) & 0x3ff;}
 static inline uintptr_t CL3(uintptr_t pa)
 {
-	return (CHLINE(pa) & 0x7ff) | (l3slice(pa) << 11);
+	return (CHLINE(pa) & 0x3ff) | (l3slice(pa) << 10);
 }
 
 #define TLLINE(x) ((x) >> 12)
@@ -159,7 +159,7 @@ static inline void tlb_evrun(void *base, uintptr_t targ, size_t n, nexthit_f nhf
 /* Cache ev */
 
 #define CACHE_W1 (8)
-#define CACHE_W2 (8)
+#define CACHE_W2 (4)
 #define CACHE_W3 (17)
 
 static uintptr_t cevpa = 0;
@@ -950,7 +950,7 @@ static void **t2njhead = NULL;
 //#define NINJA_STEP (5 - (i & 1))
 
 // BFS ninja
-#define NINJA_INIT (12)
+#define NINJA_INIT (18)
 #define NINJA_STEP (4)
 
 #define NINJA_BOILERPLATE \
@@ -1069,7 +1069,7 @@ static struct htiming ntpct_ictham(void *a1, void *a2)
 
 /* Utils & showtime! */
 
-#define PRREP (1000)
+#define PRREP (8192)
 static void prham(void *p1, void *p2, hamtime_f hf)
 {
 	struct htiming r[PRREP];
@@ -1202,6 +1202,8 @@ int main(int argc, char *argv[])
 	c1head = cache_prepnotlb(cebuf, (uintptr_t)pmds[t1], (uintptr_t)t1p, (uintptr_t)t2p);
 	c2head = cache_prepnotlb(cebuf, (uintptr_t)pmds[t2], (uintptr_t)t1p, (uintptr_t)t2p);
 
+#if 1
+// Sanity checks, disable for faster testing
 	fputc('\n', stderr);
 	fputs("Normal timing run\n", stderr);
 	prham(t1p, t2p, hamtime);
@@ -1210,10 +1212,6 @@ int main(int argc, char *argv[])
 	fputs("CacheEv timing run\n", stderr);
 	prham(t1p, t2p, evhamtime);
 
-#if 1
-	size_t it = 10;
-
-	do {
 	fputc('\n', stderr);
 	fputs("Naive(T) timing run\n", stderr);
 	prham(t1p, t2p, itham);
@@ -1221,6 +1219,40 @@ int main(int argc, char *argv[])
 	prham(t1p, t2p, pc_itham);
 	fputs("Naive(T) PCT timing run\n", stderr);
 	prham(t1p, t2p, pct_itham);
+
+	fputc('\n', stderr);
+	fputs("Naive(T+C) timing run\n", stderr);
+	prham(t1p, t2p, itcham);
+	fputs("Naive(T+C) PC timing run\n", stderr);
+	prham(t1p, t2p, pc_itcham);
+	fputs("Naive(T+C) PCT timing run\n", stderr);
+	prham(t1p, t2p, pct_itcham);
+
+	fputc('\n', stderr);
+	fputs("Ninja(T) PC timing run\n", stderr);
+	prham(t1p, t2p, ntpc_itham);
+	fputs("Ninja(T) PCT timing run\n", stderr);
+	prham(t1p, t2p, ntpct_itham);
+
+	fputc('\n', stderr);
+	fputs("Ninja(T+C) PC timing run\n", stderr);
+	prham(t1p, t2p, ntpc_itcham);
+	fputs("Ninja(T+C) PCT timing run\n", stderr);
+	prham(t1p, t2p, ntpct_itcham);
+
+#endif
+
+#if 1
+	size_t it = 10;
+
+	do {
+	//fputc('\n', stderr);
+	//fputs("Naive(T) timing run\n", stderr);
+	//prham(t1p, t2p, itham);
+	//fputs("Naive(T) PC timing run\n", stderr);
+	//prham(t1p, t2p, pc_itham);
+	//fputs("Naive(T) PCT timing run\n", stderr);
+	//prham(t1p, t2p, pct_itham);
 
 	//fprintf(stderr, "%lu us\n", usecdiff(&it_t0, &it_t));
 	//fprintf(stderr, "%ld cycles/rep\n", cyclediff(it_tsc0, it_tsc));
@@ -1274,11 +1306,11 @@ int main(int argc, char *argv[])
 	//fputc('\n', stderr);
 	//fputs("Ninja timing run\n", stderr);
 
-	fputc('\n', stderr);
-	fputs("Ninja(T) PC timing run\n", stderr);
-	prham(t1p, t2p, ntpc_itham);
-	fputs("Ninja(T) PCT timing run\n", stderr);
-	prham(t1p, t2p, ntpct_itham);
+	//fputc('\n', stderr);
+	//fputs("Ninja(T) PC timing run\n", stderr);
+	//prham(t1p, t2p, ntpc_itham);
+	//fputs("Ninja(T) PCT timing run\n", stderr);
+	//prham(t1p, t2p, ntpct_itham);
 
 	//fputc('\n', stderr);
 	//fputs("Ninja(T+C) PC timing run\n", stderr);

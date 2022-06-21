@@ -24,6 +24,11 @@ This work is part of [TLB;DR](https://vusec.net/projects/tlbdr).
 	- at boot: add `hugepagesz=1G hugepages=1` to the kernel command line
 1. Run `make run` (or `run.sh` directly)
 1. Monitor the results directory for progress beyond 1KiB for each file (tool sometimes hangs and needs to be manually restarted)
+	- if a measurement hangs, terminate the `ptham` process and `run.sh` will automatically restart the measurement
+	- interrupting `ptham` or `run.sh` will terminate the experiment run
+1. Sanity check the result files
+	- `Flush` and `CacheEv` timings should be roughly similar
+	- all other measurements should be much larger than `Normal timing run`
 
 ### Get plottable results
 1. Ensure you have obtained results by running the tool

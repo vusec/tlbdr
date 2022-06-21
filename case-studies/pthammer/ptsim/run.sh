@@ -27,8 +27,11 @@ run_ptham () {
 
 	echo "$ans" > "$PIPE"
 	echo "Hammer candidates found, continuing..."
-	wait || return 2
+	wait -n
+	rv=$?
 	trap - INT
+	test $rv -eq 130 && return 2
+	return $rv
 }
 
 
