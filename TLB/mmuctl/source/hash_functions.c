@@ -1,5 +1,6 @@
 #include <hash_functions.h>
 #include <linux/vmalloc.h>
+#include "mm_locking.h"
 
 /*
 	This function tests whether accessing 'ways + 1' pages
@@ -10,13 +11,13 @@ int test_lin_stlb(int set_bits, int ways){
 	int sets = set_bits_to_sets(set_bits);
 
 	disable_smep();
-	
+
 	volatile int i;
 
 	volatile u64 cr3k = getcr3();
-		
-	down_write(&current->mm->mmap_lock);	
-	
+
+	down_write(TLBDR_MMLOCK);
+
 	volatile unsigned long left_mask = 0;
 	for(i = 0; i < set_bits; i++){
 		left_mask |= (0x1 << (i + 12 + set_bits));
@@ -36,7 +37,7 @@ int test_lin_stlb(int set_bits, int ways){
 	for(i = 0; i < ways + 1; i++){
 		offset++;
 
-		//Compute next address that maps to the same set, according to 
+		//Compute next address that maps to the same set, according to
 		//a linear hash function assumption with 'sets' sets
 		addrs[i] = (void *)BASE + ((target_set + offset * sets) * 4096);
 
@@ -80,7 +81,7 @@ int test_lin_stlb(int set_bits, int ways){
 
 	iteration = 1;
 
-	setcr3(cr3k);	
+	setcr3(cr3k);
 
 	claim_cpu();
 
@@ -93,7 +94,7 @@ int test_lin_stlb(int set_bits, int ways){
 
 	int miss = 0;
 	iteration = 1;
-	
+
 	//Does fetching them again result in iTLB hits?
 	for(i = 0; i < ways + 1; i++){
 		if(p){
@@ -113,8 +114,8 @@ int test_lin_stlb(int set_bits, int ways){
 	give_up_cpu();
 
 	setcr3(cr3k);
-	
-	up_write(&current->mm->mmap_lock);	
+
+	up_write(TLBDR_MMLOCK);
 
 	//If there was at least one miss, return 1
 	return !!(miss == 1);
@@ -127,13 +128,13 @@ int test_lin_stlb(int set_bits, int ways){
 */
 int test_xor_stlb(int set_bits, int ways){
 	disable_smep();
-	
+
 	volatile int i;
 
 	volatile u64 cr3k = getcr3();
-		
-	down_write(&current->mm->mmap_lock);	
-	
+
+	down_write(TLBDR_MMLOCK);
+
 	volatile unsigned long left_mask = 0;
 	for(i = 0; i < set_bits; i++){
 		left_mask |= (0x1 << (i + 12 + set_bits));
@@ -153,7 +154,7 @@ int test_xor_stlb(int set_bits, int ways){
 	for(i = 0; i < ways + 1; i++){
 		offset++;
 
-		//Compute next address that maps to the same set, according to 
+		//Compute next address that maps to the same set, according to
 		//an XOR hash function assumption with 'sets' sets
 		base = (((unsigned long)BASE >> (12 + set_bits)) + offset) << (12 + set_bits);
 		right_side = ((base & left_mask) ^ (target_set << (12 + set_bits))) >> set_bits;
@@ -198,7 +199,7 @@ int test_xor_stlb(int set_bits, int ways){
 
 	vfree(addrs);
 
-	setcr3(cr3k);	
+	setcr3(cr3k);
 
 	claim_cpu();
 
@@ -210,7 +211,7 @@ int test_xor_stlb(int set_bits, int ways){
 	}
 
 	iteration = 1;
-	
+
 	//Does fetching them again result in iTLB hits?
 	for(i = 0; i < ways + 1; i++){
 		if(p){
@@ -231,7 +232,7 @@ int test_xor_stlb(int set_bits, int ways){
 
 	setcr3(cr3k);
 
-	up_write(&current->mm->mmap_lock);
+	up_write(TLBDR_MMLOCK);
 
 	//If there was at least one miss, return 1
 	return miss;
@@ -245,14 +246,14 @@ int test_xor_stlb(int set_bits, int ways){
 */
 int test_lin_itlb_stlb_lin(int set_bits, int ways){
 	disable_smep();
-	
+
 	volatile int i, iteration;
 	volatile unsigned long p;
 
 	volatile u64 cr3k = getcr3();
-		
-	down_write(&current->mm->mmap_lock);	
-	
+
+	down_write(TLBDR_MMLOCK);
+
 	//Sample a random sTLB set
 	unsigned int target_stlb_set = get_stlb_set(set_bits_to_sets(tlb.shared_component->set_bits), 1);
 
@@ -262,8 +263,8 @@ int test_lin_itlb_stlb_lin(int set_bits, int ways){
 	volatile unsigned long *addrs = vmalloc(sizeof(unsigned long) * addresses_needed);
 	volatile unsigned long *addrs1 = vmalloc(sizeof(unsigned long) * addresses_needed / 2);
 	volatile unsigned long *addrs2 = vmalloc(sizeof(unsigned long) * addresses_needed / 2);
-	
-	//Obtain ways + 1 + 4 * sTLB_ways addresses that map to the same same iTLB set, 
+
+	//Obtain ways + 1 + 4 * sTLB_ways addresses that map to the same same iTLB set,
 	//making the assumption that the iTLB has a linear hash function and that it has 2^set_bits sets.
 	//The addresses are equally spread over two sTLB sets.
 	get_address_set_stlb_lin(addrs1, target_stlb_set, tlb.shared_component->set_bits, addresses_needed / 2);
@@ -343,8 +344,8 @@ int test_lin_itlb_stlb_lin(int set_bits, int ways){
 	give_up_cpu();
 
 	setcr3(cr3k);
-	
-	up_write(&current->mm->mmap_lock);	
+
+	up_write(TLBDR_MMLOCK);
 
 	//If there was at least one miss, return 1
 	return !!(miss == 1);
@@ -358,14 +359,14 @@ int test_lin_itlb_stlb_lin(int set_bits, int ways){
 */
 int test_lin_dtlb_stlb_lin(int set_bits, int ways){
 	disable_smep();
-	
+
 	volatile int i, iteration;
 	volatile unsigned long p;
 
 	volatile u64 cr3k = getcr3();
-		
-	down_write(&current->mm->mmap_lock);	
-	
+
+	down_write(TLBDR_MMLOCK);
+
 	//Sample a random sTLB set
 	unsigned int target_stlb_set = get_stlb_set(set_bits_to_sets(tlb.shared_component->set_bits), 1);
 
@@ -375,8 +376,8 @@ int test_lin_dtlb_stlb_lin(int set_bits, int ways){
 	volatile unsigned long *addrs = vmalloc(sizeof(unsigned long) * addresses_needed);
 	volatile unsigned long *addrs1 = vmalloc(sizeof(unsigned long) * addresses_needed / 2);
 	volatile unsigned long *addrs2 = vmalloc(sizeof(unsigned long) * addresses_needed / 2);
-	
-	//Obtain ways + 1 + 4 * sTLB_ways addresses that map to the same same dTLB set, 
+
+	//Obtain ways + 1 + 4 * sTLB_ways addresses that map to the same same dTLB set,
 	//making the assumption that the dTLB has a linear hash function and that it has 2^set_bits sets.
 	//The addresses are equally spread over two sTLB sets.
 	get_address_set_stlb_lin(addrs1, target_stlb_set, tlb.shared_component->set_bits, addresses_needed / 2);
@@ -456,8 +457,8 @@ int test_lin_dtlb_stlb_lin(int set_bits, int ways){
 	give_up_cpu();
 
 	setcr3(cr3k);
-	
-	up_write(&current->mm->mmap_lock);	
+
+	up_write(TLBDR_MMLOCK);
 
 	//If there was at least one miss, return 1
 	return !!(miss == 1);
@@ -471,14 +472,14 @@ int test_lin_dtlb_stlb_lin(int set_bits, int ways){
 */
 int test_lin_itlb_stlb_xor(int set_bits, int ways){
 	disable_smep();
-	
+
 	volatile int i, iteration;
 	volatile unsigned long p;
 
 	volatile u64 cr3k = getcr3();
-		
-	down_write(&current->mm->mmap_lock);	
-	
+
+	down_write(TLBDR_MMLOCK);
+
 	//Sample a random iTLB set, assuming 2^set_ways sets and a linear hash function.
 	//Also sample a random sTLB set.
 	volatile unsigned int target_itlb_set = get_itlb_set(set_bits_to_sets(set_bits), 1);
@@ -489,7 +490,7 @@ int test_lin_itlb_stlb_xor(int set_bits, int ways){
 	volatile unsigned long *addrs = vmalloc(sizeof(unsigned long) * addresses_needed);
 
 	//Obtain ways + 1 * (2 * sTLB_ways) addresses that map to the same sTLB set and iTLB set
-	get_address_set_stlb_xor(addrs, target_stlb_set, target_itlb_set, tlb.shared_component->set_bits, set_bits, addresses_needed);	
+	get_address_set_stlb_xor(addrs, target_stlb_set, target_itlb_set, tlb.shared_component->set_bits, set_bits, addresses_needed);
 
 	iteration = 1;
 	p = addrs[0];
@@ -500,7 +501,7 @@ int test_lin_itlb_stlb_xor(int set_bits, int ways){
 	//addrs[1] + 4096 --> 0
 	//...
 	//addrs[ways + 1 * 2 * sTLB_ways - 1] + 4096 --> 0
-	
+
 	for(i = 0; i < ways + (2 * tlb.shared_component->ways); i++){
 		write_instruction_chain(addrs[i], &iteration, addrs[i + 1]);
 		iteration = iteration - 1;
@@ -514,7 +515,7 @@ int test_lin_itlb_stlb_xor(int set_bits, int ways){
 	//Perform page walks for the first ways + 1 addresses
 	volatile struct ptwalk walks[ways + 1];
 	volatile int values[ways + 1];
-	
+
 	for(i = 0; i < ways + 1; i++){
 		resolve_va(addrs[i], &walks[i], 0);
 		clear_nx(walks[i].pgd);
@@ -562,8 +563,8 @@ int test_lin_itlb_stlb_xor(int set_bits, int ways){
 	give_up_cpu();
 
 	setcr3(cr3k);
-	
-	up_write(&current->mm->mmap_lock);	
+
+	up_write(TLBDR_MMLOCK);
 
 	//If there was at least one miss, return 1
 	return !!(miss == 1);
@@ -577,14 +578,14 @@ int test_lin_itlb_stlb_xor(int set_bits, int ways){
 */
 int test_lin_dtlb_stlb_xor(int set_bits, int ways){
 	disable_smep();
-	
+
 	volatile int i, iteration;
 	volatile unsigned long p;
 
 	volatile u64 cr3k = getcr3();
-		
-	down_write(&current->mm->mmap_lock);	
-	
+
+	down_write(TLBDR_MMLOCK);
+
 	//Sample a random iTLB set, assuming 2^set_ways sets and a linear hash function.
 	//Also sample a random sTLB set.
 	volatile unsigned int target_dtlb_set = get_dtlb_set(set_bits_to_sets(set_bits), 1);
@@ -595,7 +596,7 @@ int test_lin_dtlb_stlb_xor(int set_bits, int ways){
 	volatile unsigned long *addrs = vmalloc(sizeof(unsigned long) * addresses_needed);
 
 	//Obtain ways + 1 * (2 * sTLB_ways) addresses that map to the same sTLB set and iTLB set
-	get_address_set_stlb_xor(addrs, target_stlb_set, target_dtlb_set, tlb.shared_component->set_bits, set_bits, addresses_needed);	
+	get_address_set_stlb_xor(addrs, target_stlb_set, target_dtlb_set, tlb.shared_component->set_bits, set_bits, addresses_needed);
 
 	iteration = 1;
 	p = addrs[0];
@@ -668,8 +669,8 @@ int test_lin_dtlb_stlb_xor(int set_bits, int ways){
 	give_up_cpu();
 
 	setcr3(cr3k);
-	
-	up_write(&current->mm->mmap_lock);	
+
+	up_write(TLBDR_MMLOCK);
 
 	//If there was at least one miss, return 1
 	return !!(miss == 1);

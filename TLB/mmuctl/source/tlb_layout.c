@@ -1,5 +1,6 @@
 #include <tlb_layout.h>
 #include <linux/vmalloc.h>
+#include "mm_locking.h"
 
 /*
 	This function tests whether a PTE is cached the dTLB
@@ -12,7 +13,7 @@ int non_inclusivity(void){
 	}
 
 	disable_smep();
-	
+
 	u64 cr3k;
 	cr3k = getcr3();
 	setcr3(cr3k);
@@ -37,8 +38,8 @@ int non_inclusivity(void){
 	struct ptwalk walk;
 	resolve_va(addr, &walk, 0);
 	clear_nx(walk.pgd);
-		
-	down_write(&current->mm->mmap_lock);	
+
+	down_write(TLBDR_MMLOCK);
 
 	claim_cpu();
 
@@ -56,11 +57,11 @@ int non_inclusivity(void){
 	int curr = read(addr);
 
 	give_up_cpu();
-	
+
 	//Restore page table
 	switch_pages(walk.pte, walk.pte + 1);
 
-	up_write(&current->mm->mmap_lock);	
+	up_write(TLBDR_MMLOCK);
 
 	setcr3(cr3k);
 
@@ -74,7 +75,7 @@ int non_inclusivity(void){
 */
 int non_exclusivity(void){
 	disable_smep();
-	
+
 	volatile u64 cr3k = getcr3();
 	volatile int i, iteration;
 	volatile unsigned long p, random_offset;
@@ -111,7 +112,7 @@ int non_exclusivity(void){
 
 	iteration = 1;
 
-	down_write(&current->mm->mmap_lock);	
+	down_write(TLBDR_MMLOCK);
 	setcr3(cr3k);
 
 	claim_cpu();
@@ -126,13 +127,13 @@ int non_exclusivity(void){
 	int curr = execute(p);
 
 	give_up_cpu();
-	
+
 	//Restore page table
 	switch_pages(walk.pte, walk.pte + 1);
 
-	up_write(&current->mm->mmap_lock);	
+	up_write(TLBDR_MMLOCK);
 
-	setcr3(cr3k);	
+	setcr3(cr3k);
 
 	//Return 1 if PTE was still cached
 	return !!(original == curr);
@@ -144,7 +145,7 @@ int non_exclusivity(void){
 */
 int reinsert_itlb(void){
 	disable_smep();
-	
+
 	volatile u64 cr3k = getcr3();
 	volatile int i, iteration;
 	volatile unsigned long p;
@@ -152,7 +153,7 @@ int reinsert_itlb(void){
 	//Sample random sTLB and iTLB sets
 	unsigned int target_stlb_set = get_stlb_set(tlb.shared_component->set_bits, 0);
 	unsigned int target_itlb_set = get_itlb_set(tlb.split_component_instruction->set_bits, 0);
-	
+
 	//Obtain sTLB_ways * 2 + 1 addresses that map to the same iTLB and sTLB set
 	unsigned long *addrs = vmalloc(sizeof(unsigned long) * (tlb.shared_component->ways * 2 + 1));
 	if(tlb.shared_component->hash_function == XOR){
@@ -168,7 +169,7 @@ int reinsert_itlb(void){
 
 	iteration = 1;
 	p = addrs[0];
-	
+
 	//Read the original value of the addr[0]
 	volatile int original = read(p);
 
@@ -187,7 +188,7 @@ int reinsert_itlb(void){
 
 	iteration = 1;
 
-	down_write(&current->mm->mmap_lock);	
+	down_write(TLBDR_MMLOCK);
 	setcr3(cr3k);
 
 	claim_cpu();
@@ -200,7 +201,7 @@ int reinsert_itlb(void){
 
 	//Desync TLB
 	switch_pages(walk.pte, walk.pte + 1);
-	
+
 	//We wash the sTLB
 	for(i = 0; i < tlb.shared_component->ways * 2; i++){
 		p = read_walk(p, &iteration);
@@ -214,9 +215,9 @@ int reinsert_itlb(void){
 	//Restore page table
 	switch_pages(walk.pte, walk.pte + 1);
 
-	up_write(&current->mm->mmap_lock);	
+	up_write(TLBDR_MMLOCK);
 
-	setcr3(cr3k);	
+	setcr3(cr3k);
 
 	//Return 1 if PTE was still cached
 	return !!(original == curr);
@@ -228,7 +229,7 @@ int reinsert_itlb(void){
 */
 int reinsert_dtlb(void){
 	disable_smep();
-	
+
 	volatile u64 cr3k = getcr3();
 	volatile int i, iteration;
 	volatile unsigned long p;
@@ -236,7 +237,7 @@ int reinsert_dtlb(void){
 	//Sample random sTLB and dTLB sets
 	unsigned int target_stlb_set = get_stlb_set(tlb.shared_component->set_bits, 0);
 	unsigned int target_dtlb_set = get_dtlb_set(tlb.split_component_data->set_bits, 0);
-	
+
 	//Obtain sTLB_ways * 2 + 1 addresses that map to the same dTLB and sTLB set
 	unsigned long *addrs = vmalloc(sizeof(unsigned long) * (tlb.shared_component->ways * 2 + 1));
 	if(tlb.shared_component->hash_function == XOR){
@@ -271,7 +272,7 @@ int reinsert_dtlb(void){
 
 	iteration = 1;
 
-	down_write(&current->mm->mmap_lock);	
+	down_write(TLBDR_MMLOCK);
 	setcr3(cr3k);
 
 	claim_cpu();
@@ -284,7 +285,7 @@ int reinsert_dtlb(void){
 
 	//Desync TLB
 	switch_pages(walk.pte, walk.pte + 1);
-	
+
 	//We wash the sTLB
 	for(i = 0; i < tlb.shared_component->ways * 2; i++){
 		p = execute_walk(p, &iteration);
@@ -298,9 +299,9 @@ int reinsert_dtlb(void){
 	//Restore page table
 	switch_pages(walk.pte, walk.pte + 1);
 
-	up_write(&current->mm->mmap_lock);	
+	up_write(TLBDR_MMLOCK);
 
-	setcr3(cr3k);	
+	setcr3(cr3k);
 
 	//Return 1 if PTE was still cached
 	return !!(original == curr);
@@ -312,7 +313,7 @@ int reinsert_dtlb(void){
 */
 int reinsert_stlb_data(void){
 	disable_smep();
-	
+
 	volatile u64 cr3k = getcr3();
 	volatile int i, iteration, curr;
 	volatile unsigned long p;
@@ -320,7 +321,7 @@ int reinsert_stlb_data(void){
 	//Sample random sTLB and dTLB sets
 	unsigned int target_stlb_set = get_stlb_set(tlb.shared_component->set_bits, 0);
 	unsigned int target_dtlb_set = get_dtlb_set(tlb.split_component_data->set_bits, 0);
-	
+
 	//Obtain sTLB_ways * 2 + 1 addresses that map to the same dTLB and sTLB set
 	unsigned long *addrs = vmalloc(sizeof(unsigned long) * (tlb.shared_component->ways * 2 + 1));
 	if(tlb.shared_component->hash_function == XOR){
@@ -336,7 +337,7 @@ int reinsert_stlb_data(void){
 
 	iteration = 1;
 	p = addrs[0];
-	
+
 	//Read the original value of the addr[0]
 	volatile int original = execute(p);
 
@@ -358,7 +359,7 @@ int reinsert_stlb_data(void){
 
 	iteration = 1;
 
-	down_write(&current->mm->mmap_lock);	
+	down_write(TLBDR_MMLOCK);
 
 	setcr3(cr3k);
 
@@ -369,12 +370,12 @@ int reinsert_stlb_data(void){
 
 	//Desync TLB
 	switch_pages(walk.pte, walk.pte + 1);
-	
+
 	//We wash the sTLB
 	for(i = 0; i < tlb.shared_component->ways * 2; i++){
 		p = execute_walk(p, &iteration);
 	}
-	
+
 	//Hit on the dTLB
 	p = read_walk(p, &iteration);
 
@@ -384,16 +385,16 @@ int reinsert_stlb_data(void){
 	}else{
 		printk("No dTLB hit!\n");
 		curr = original;
-	}	
+	}
 
 	give_up_cpu();
 
 	//Restore page table
 	switch_pages(walk.pte, walk.pte + 1);
 
-	up_write(&current->mm->mmap_lock);	
+	up_write(TLBDR_MMLOCK);
 
-	setcr3(cr3k);	
+	setcr3(cr3k);
 
 	//Return 1 if PTE was still cached
 	return !!(original == curr);
@@ -405,7 +406,7 @@ int reinsert_stlb_data(void){
 */
 int reinsert_stlb_instruction(void){
 	disable_smep();
-	
+
 	volatile u64 cr3k = getcr3();
 	volatile int i, iteration, curr;
 	volatile unsigned long p;
@@ -413,7 +414,7 @@ int reinsert_stlb_instruction(void){
 	//Sample random sTLB and iTLB sets
 	unsigned int target_stlb_set = get_stlb_set(tlb.shared_component->set_bits, 0);
 	unsigned int target_itlb_set = get_itlb_set(tlb.split_component_instruction->set_bits, 0);
-	
+
 	//Obtain sTLB_ways * 2 + 1 addresses that map to the same iTLB and sTLB set
 	unsigned long *addrs = vmalloc(sizeof(unsigned long) * (tlb.shared_component->ways * 2 + 1));
 	if(tlb.shared_component->hash_function == XOR){
@@ -451,7 +452,7 @@ int reinsert_stlb_instruction(void){
 
 	iteration = 1;
 
-	down_write(&current->mm->mmap_lock);	
+	down_write(TLBDR_MMLOCK);
 
 	setcr3(cr3k);
 
@@ -462,12 +463,12 @@ int reinsert_stlb_instruction(void){
 
 	//Desync TLB
 	switch_pages(walk.pte, walk.pte + 1);
-	
+
 	//We wash the sTLB
 	for(i = 0; i < tlb.shared_component->ways * 2; i++){
 		p = read_walk(p, &iteration);
 	}
-	
+
 	//Hit on the iTLB
 	p = execute_walk(p, &iteration);
 
@@ -484,9 +485,9 @@ int reinsert_stlb_instruction(void){
 	//Restore page table
 	switch_pages(walk.pte, walk.pte + 1);
 
-	up_write(&current->mm->mmap_lock);	
+	up_write(TLBDR_MMLOCK);
 
-	setcr3(cr3k);	
+	setcr3(cr3k);
 
 	//Return 1 if PTE was still cached
 	return !!(original == curr);
@@ -498,7 +499,7 @@ int reinsert_stlb_instruction(void){
 */
 int reinsert_stlb_dtlb_eviction(void){
 	disable_smep();
-	
+
 	volatile u64 cr3k = getcr3();
 	volatile int i, iteration;
 	volatile unsigned long p;
@@ -507,7 +508,7 @@ int reinsert_stlb_dtlb_eviction(void){
 	unsigned int target_stlb_set = get_stlb_set(tlb.shared_component->set_bits, 0);
 	unsigned int target_dtlb_set = get_dtlb_set(tlb.split_component_data->set_bits, 0);
 
-	//Obtain sTLB_ways * 2 + 1 addresses that map to the same dTLB and sTLB set	
+	//Obtain sTLB_ways * 2 + 1 addresses that map to the same dTLB and sTLB set
 	//Obtain another dTLB_ways * 2 addresses that map to the same dTLB set, but different sTLB set
 	unsigned long *addrs = vmalloc(sizeof(unsigned long) * (tlb.shared_component->ways * 2 + 1));
 	unsigned long *wash_addr = vmalloc(sizeof(unsigned long) * tlb.split_component_data->ways * 2);
@@ -552,7 +553,7 @@ int reinsert_stlb_dtlb_eviction(void){
 
 	iteration = 1;
 
-	down_write(&current->mm->mmap_lock);	
+	down_write(TLBDR_MMLOCK);
 	setcr3(cr3k);
 
 	claim_cpu();
@@ -562,7 +563,7 @@ int reinsert_stlb_dtlb_eviction(void){
 
 	//Desync TLB
 	switch_pages(walk.pte, walk.pte + 1);
-	
+
 	//We wash the sTLB
 	for(i = 0; i < tlb.shared_component->ways * 2; i++){
 		p = execute_walk(p, &iteration);
@@ -574,7 +575,7 @@ int reinsert_stlb_dtlb_eviction(void){
 	for(i = 0; i < tlb.split_component_data->ways * 2; i++){
 		p = read_walk(p, &iteration);
 	}
-	
+
 	//Did this eviction result in sTLB re-insertion?
 	int curr = execute(p);
 
@@ -583,9 +584,9 @@ int reinsert_stlb_dtlb_eviction(void){
 	//Restore page table
 	switch_pages(walk.pte, walk.pte + 1);
 
-	up_write(&current->mm->mmap_lock);	
+	up_write(TLBDR_MMLOCK);
 
-	setcr3(cr3k);	
+	setcr3(cr3k);
 
 	//Return 1 if PTE was still cached
 	return !!(original == curr);
@@ -597,7 +598,7 @@ int reinsert_stlb_dtlb_eviction(void){
 */
 int reinsert_stlb_itlb_eviction(void){
 	disable_smep();
-	
+
 	volatile u64 cr3k = getcr3();
 	volatile int i, iteration;
 	volatile unsigned long p;
@@ -606,7 +607,7 @@ int reinsert_stlb_itlb_eviction(void){
 	unsigned int target_stlb_set = get_stlb_set(tlb.shared_component->set_bits, 0);
 	unsigned int target_itlb_set = get_itlb_set(tlb.split_component_instruction->set_bits, 0);
 
-	//Obtain sTLB_ways * 2 + 1 addresses that map to the same iTLB and sTLB set	
+	//Obtain sTLB_ways * 2 + 1 addresses that map to the same iTLB and sTLB set
 	//Obtain another iTLB_ways * 2 addresses that map to the same iTLB set, but different sTLB set
 	unsigned long *addrs = vmalloc(sizeof(unsigned long) * (tlb.shared_component->ways * 2 + 1));
 	unsigned long *wash_addr = vmalloc(sizeof(unsigned long) * tlb.split_component_instruction->ways * 2);
@@ -651,7 +652,7 @@ int reinsert_stlb_itlb_eviction(void){
 
 	iteration = 1;
 
-	down_write(&current->mm->mmap_lock);	
+	down_write(TLBDR_MMLOCK);
 	setcr3(cr3k);
 
 	claim_cpu();
@@ -661,7 +662,7 @@ int reinsert_stlb_itlb_eviction(void){
 
 	//Desync TLB
 	switch_pages(walk.pte, walk.pte + 1);
-	
+
 	//We wash the sTLB
 	for(i = 0; i < tlb.shared_component->ways * 2; i++){
 		p = read_walk(p, &iteration);
@@ -673,18 +674,18 @@ int reinsert_stlb_itlb_eviction(void){
 	for(i = 0; i < tlb.split_component_instruction->ways * 2; i++){
 		p = execute_walk(p, &iteration);
 	}
-	
+
 	//Did this eviction result in sTLB re-insertion?
 	int curr = read(p);
 
 	give_up_cpu();
-	
+
 	//Restore page table
 	switch_pages(walk.pte, walk.pte + 1);
 
-	up_write(&current->mm->mmap_lock);	
+	up_write(TLBDR_MMLOCK);
 
-	setcr3(cr3k);	
+	setcr3(cr3k);
 
 	//Return 1 if PTE was still cached
 	return !!(original == curr);

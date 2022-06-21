@@ -1,5 +1,6 @@
 #include <pcid.h>
 #include <linux/vmalloc.h>
+#include "mm_locking.h"
 
 /*
 	This function finds the maximum number of PCIDs supported by the sTLB.
@@ -10,11 +11,11 @@ int stlb_pcid_limit(int pcid_writes, int no_flush){
 		printk("Need more addresses to test for STLB PCID limit. Please increase FREEDOM_OF_BITS to at least 10.\n");
 		BUG();
 	}
-	
+
 	disable_smep();
 
     volatile unsigned int i;
-	
+
     unsigned long *pcids = vmalloc(4096 * sizeof(unsigned long));
 
 	//Get the 4096 possible PCIDs in a random order
@@ -42,8 +43,8 @@ int stlb_pcid_limit(int pcid_writes, int no_flush){
 	struct ptwalk walk;
 	resolve_va(addr, &walk, 0);
 	clear_nx(walk.pgd);
-		
-	down_write(&current->mm->mmap_lock);	
+
+	down_write(TLBDR_MMLOCK);
 
 	claim_cpu();
 
@@ -53,7 +54,7 @@ int stlb_pcid_limit(int pcid_writes, int no_flush){
 	}else{
 		setcr3(cr3 | pcids[0]);
 	}
-	
+
 	//Read the original value to be able to distinguish TLB hits from misses
 	int original = read(addr);
 
@@ -80,7 +81,7 @@ int stlb_pcid_limit(int pcid_writes, int no_flush){
 
 	switch_pages(walk.pte, walk.pte + 1);
 
-	up_write(&current->mm->mmap_lock);	
+	up_write(TLBDR_MMLOCK);
 
     vfree(pcids);
 
@@ -97,11 +98,11 @@ int stlb_pcid_vector_evicted(int vector_index, int element, int position, int no
 	u64 cr3 = (getcr3() >> 12) << 12;
 
     volatile int original, curr, i;
-	
+
     unsigned int target_stlb_set = get_stlb_set(set_bits_to_sets(tlb.shared_component->set_bits), 0);
 	unsigned int target_dtlb_set = get_dtlb_set(set_bits_to_sets(tlb.split_component_data->set_bits), 0);
 
-	unsigned long addrs[1];	
+	unsigned long addrs[1];
 
     if(tlb.shared_component->hash_function == XOR){
         get_address_set_stlb_xor(addrs, target_stlb_set, target_dtlb_set, tlb.shared_component->set_bits, tlb.split_component_data->set_bits, 1);
@@ -111,12 +112,12 @@ int stlb_pcid_vector_evicted(int vector_index, int element, int position, int no
 
 	unsigned long *pcids = vmalloc(4096 * sizeof(unsigned long));
 	get_random_pcids(pcids);
-    
+
 	struct ptwalk walk;
 	resolve_va(addrs[0], &walk, 0);
     clear_nx(walk.pgd);
- 
-    down_write(&current->mm->mmap_lock);	
+
+    down_write(TLBDR_MMLOCK);
 
 	claim_cpu();
 
@@ -145,14 +146,14 @@ int stlb_pcid_vector_evicted(int vector_index, int element, int position, int no
 			setcr3(cr3 | pcids[i + tlb.shared_component->pcids_supported] | CR3_NOFLUSH);
 		}
     }
-    
+
 	setcr3(cr3 | pcids[element] | CR3_NOFLUSH);
     curr = execute(addrs[0]);
     give_up_cpu();
 
 	switch_pages(walk.pte, walk.pte + 1);
 
-    up_write(&current->mm->mmap_lock);
+    up_write(TLBDR_MMLOCK);
 
 	vfree(pcids);
 
@@ -196,11 +197,11 @@ int dtlb_pcid_limit(int pcid_writes, int no_flush){
 		printk("Need more addresses to test for DTLB PCID limit. Please increase FREEDOM_OF_BITS to at least 10.\n");
 		BUG();
 	}
-	
+
 	disable_smep();
 
     volatile unsigned int i;
-	
+
     unsigned long *pcids = vmalloc(4096 * sizeof(unsigned long));
 
 	//Get the 4096 possible PCIDs in a random order
@@ -228,8 +229,8 @@ int dtlb_pcid_limit(int pcid_writes, int no_flush){
 	struct ptwalk walk;
 	resolve_va(addrs[0], &walk, 0);
 	clear_nx(walk.pgd);
-		
-	down_write(&current->mm->mmap_lock);	
+
+	down_write(TLBDR_MMLOCK);
 
 	claim_cpu();
 
@@ -239,7 +240,7 @@ int dtlb_pcid_limit(int pcid_writes, int no_flush){
 	}else{
 		setcr3(cr3 | pcids[0]);
 	}
-	
+
 	//Read the original value to be able to distinguish TLB hits from misses
 	int original = read(addrs[0]);
 
@@ -247,7 +248,7 @@ int dtlb_pcid_limit(int pcid_writes, int no_flush){
 	for(i = 0; i < 2 * tlb.shared_component->ways; i++){
 		execute(addrs[i + 1]);
 	}
-	
+
 	//Desync the TLB
 	switch_pages(walk.pte, walk.pte + 1);
 
@@ -272,7 +273,7 @@ int dtlb_pcid_limit(int pcid_writes, int no_flush){
 
 	switch_pages(walk.pte, walk.pte + 1);
 
-	up_write(&current->mm->mmap_lock);	
+	up_write(TLBDR_MMLOCK);
 
 	setcr3(cr3k);
 
@@ -293,11 +294,11 @@ int itlb_pcid_limit(int pcid_writes, int no_flush){
 		printk("Need more addresses to test for DTLB PCID limit. Please increase FREEDOM_OF_BITS to at least 10.\n");
 		BUG();
 	}
-	
+
 	disable_smep();
 
     volatile unsigned int i;
-	
+
     unsigned long *pcids = vmalloc(4096 * sizeof(unsigned long));
 
 	//Get the 4096 possible PCIDs in a random order
@@ -324,8 +325,8 @@ int itlb_pcid_limit(int pcid_writes, int no_flush){
 	struct ptwalk walk;
 	resolve_va(addrs[0], &walk, 0);
 	clear_nx(walk.pgd);
-		
-	down_write(&current->mm->mmap_lock);	
+
+	down_write(TLBDR_MMLOCK);
 
 	claim_cpu();
 
@@ -368,7 +369,7 @@ int itlb_pcid_limit(int pcid_writes, int no_flush){
 
 	switch_pages(walk.pte, walk.pte + 1);
 
-	up_write(&current->mm->mmap_lock);	
+	up_write(TLBDR_MMLOCK);
 
     vfree(pcids);
 

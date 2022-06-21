@@ -1,7 +1,8 @@
 #include <replacement.h>
 #include <linux/vmalloc.h>
+#include "mm_locking.h"
 
-int test_shared_replacement(int sequence[], int length, int failure_distribution[], int distribution[], int expect_eviction){	
+int test_shared_replacement(int sequence[], int length, int failure_distribution[], int distribution[], int expect_eviction){
 	disable_smep();
 
 	volatile int i, iteration, k, value, original, offset, j;
@@ -9,9 +10,9 @@ int test_shared_replacement(int sequence[], int length, int failure_distribution
 	offset = replacement_number_of_pages;
 
 	volatile u64 cr3k = getcr3();
-		
-	down_write(&current->mm->mmap_lock);	
-	
+
+	down_write(TLBDR_MMLOCK);
+
 	volatile unsigned int target_dtlb_set = get_dtlb_set(set_bits_to_sets(tlb.split_component_data->set_bits), 0);
 	volatile unsigned int target_stlb_set = get_stlb_set(set_bits_to_sets(tlb.shared_component->set_bits), 0);
 
@@ -19,8 +20,8 @@ int test_shared_replacement(int sequence[], int length, int failure_distribution
 
 	volatile int addresses_needed = replacement_number_of_pages + (2 * tlb.shared_component->ways);
 
-	volatile unsigned long *addrs = vmalloc(sizeof(unsigned long) * addresses_needed);	
-	volatile unsigned long *wash = vmalloc(sizeof(unsigned long) * 2 * tlb.split_component_data->ways);	
+	volatile unsigned long *addrs = vmalloc(sizeof(unsigned long) * addresses_needed);
+	volatile unsigned long *wash = vmalloc(sizeof(unsigned long) * 2 * tlb.split_component_data->ways);
 
 	volatile struct ptwalk walk;
 
@@ -60,7 +61,7 @@ int test_shared_replacement(int sequence[], int length, int failure_distribution
 	}
 
 	write_instruction_chain(addrs[2 * tlb.shared_component->ways - 1 + offset], &iteration, addrs[sequence[0]]);
-	
+
 	for(i = 0; i < length - 1; i++){
 		write_instruction_chain(addrs[sequence[i]], &iteration, addrs[sequence[i + 1]]);
 	}
@@ -69,7 +70,7 @@ int test_shared_replacement(int sequence[], int length, int failure_distribution
 
 	iteration = 1;
 	claim_cpu();
-		
+
 	//Warming STLB & DTLB
 	for(i = 0; i < 2 * tlb.shared_component->ways; i++){
 		p = read_walk(p, &iteration);
@@ -79,7 +80,7 @@ int test_shared_replacement(int sequence[], int length, int failure_distribution
 	p = read_walk(p, &iteration);
 
 	switch_pages(walk.pte, walk.pte + 1);
-	
+
 	//Visit the rest of the sequence
 	for(i = 0; i < length - 2; i++){
 		for(j = 0; j < 2 * tlb.split_component_data->ways; j++){
@@ -94,10 +95,10 @@ int test_shared_replacement(int sequence[], int length, int failure_distribution
 	spirt(p);
 
 	switch_pages(walk.pte, walk.pte + 1);
-	
+
 	give_up_cpu();
 
-	up_write(&current->mm->mmap_lock);	
+	up_write(TLBDR_MMLOCK);
 
 	volatile int evicted = !!(value == ((original + 1) % set_bits_to_sets(UNIQUE_BITS)));
 
@@ -112,16 +113,16 @@ int test_shared_replacement(int sequence[], int length, int failure_distribution
 	return evicted;
 }
 
-int test_split_data_replacement(int sequence[], int length, int failure_distribution[], int distribution[], int expect_eviction){	
+int test_split_data_replacement(int sequence[], int length, int failure_distribution[], int distribution[], int expect_eviction){
 	disable_smep();
 
 	volatile int i, iteration, k, value, original, number_of_washings, offset;
 	volatile unsigned long p;
 	number_of_washings = 2 * tlb.shared_component->ways;
 	offset = replacement_number_of_pages;
-		
-	down_write(&current->mm->mmap_lock);	
-	
+
+	down_write(TLBDR_MMLOCK);
+
 	volatile unsigned int target_dtlb_set = get_dtlb_set(set_bits_to_sets(tlb.split_component_data->set_bits), 0);
 	volatile unsigned int target_stlb_set = get_stlb_set(set_bits_to_sets(tlb.shared_component->set_bits), 0);
 
@@ -129,7 +130,7 @@ int test_split_data_replacement(int sequence[], int length, int failure_distribu
 
 	volatile int addresses_needed = replacement_number_of_pages + (2 * tlb.split_component_data->ways) + (2 * tlb.shared_component->ways);
 
-	volatile unsigned long *addrs = vmalloc(sizeof(unsigned long) * addresses_needed);	
+	volatile unsigned long *addrs = vmalloc(sizeof(unsigned long) * addresses_needed);
 
 	if(tlb.shared_component && tlb.shared_component->hash_function == XOR){
 		get_address_set_stlb_xor(addrs, target_stlb_set, target_dtlb_set, tlb.shared_component->set_bits, tlb.split_component_data->set_bits, addresses_needed);
@@ -191,7 +192,7 @@ int test_split_data_replacement(int sequence[], int length, int failure_distribu
 	for(i = 0; i < number_of_washings; i++){
 		p = execute_walk(p, &iteration);
 	}
-	
+
 	//Visit the rest of the sequence
 	for(i = 0; i < length - 2; i++){
 		p = read_walk(p, &iteration);
@@ -205,8 +206,8 @@ int test_split_data_replacement(int sequence[], int length, int failure_distribu
 	spirt(p);
 
 	switch_pages(walk.pte, walk.pte + 1);
-	
-	up_write(&current->mm->mmap_lock);	
+
+	up_write(TLBDR_MMLOCK);
 
 	volatile int evicted = !!(value == ((original + 1) % set_bits_to_sets(UNIQUE_BITS)));
 
@@ -219,16 +220,16 @@ int test_split_data_replacement(int sequence[], int length, int failure_distribu
 	return evicted;
 }
 
-int test_split_instruction_replacement(int sequence[], int length, int failure_distribution[], int distribution[], int expect_eviction){	
+int test_split_instruction_replacement(int sequence[], int length, int failure_distribution[], int distribution[], int expect_eviction){
 	disable_smep();
 
 	volatile int i, iteration, k, value, original, number_of_washings, offset;
 	volatile unsigned long p;
 	number_of_washings = 2 * tlb.shared_component->ways;
 	offset = replacement_number_of_pages;
-		
-	down_write(&current->mm->mmap_lock);	
-	
+
+	down_write(TLBDR_MMLOCK);
+
 	volatile unsigned int target_itlb_set = get_itlb_set(set_bits_to_sets(tlb.split_component_instruction->set_bits), 0);
 	volatile unsigned int target_stlb_set = get_stlb_set(set_bits_to_sets(tlb.shared_component->set_bits), 0);
 
@@ -236,7 +237,7 @@ int test_split_instruction_replacement(int sequence[], int length, int failure_d
 
 	volatile int addresses_needed = replacement_number_of_pages + (2 * tlb.split_component_instruction->ways) + (2 * tlb.shared_component->ways);
 
-	volatile unsigned long *addrs = vmalloc(sizeof(unsigned long) * addresses_needed);	
+	volatile unsigned long *addrs = vmalloc(sizeof(unsigned long) * addresses_needed);
 
 	if(tlb.shared_component && tlb.shared_component->hash_function == XOR){
 		get_address_set_stlb_xor(addrs, target_stlb_set, target_itlb_set, tlb.shared_component->set_bits, tlb.split_component_instruction->set_bits, addresses_needed);
@@ -292,7 +293,7 @@ int test_split_instruction_replacement(int sequence[], int length, int failure_d
 	for(i = 0; i < number_of_washings; i++){
 		p = read_walk(p, &iteration);
 	}
-	
+
 	//Visit the rest of the sequence
 	for(i = 0; i < length - 2; i++){
 		p = execute_walk(p, &iteration);
@@ -303,11 +304,11 @@ int test_split_instruction_replacement(int sequence[], int length, int failure_d
 
 	give_up_cpu();
 
-	spirt(p);	
+	spirt(p);
 
 	switch_pages(walk.pte, walk.pte + 1);
 
-	up_write(&current->mm->mmap_lock);	
+	up_write(TLBDR_MMLOCK);
 
 	volatile int evicted = !!(value == ((original + 1) % set_bits_to_sets(UNIQUE_BITS)));
 
@@ -324,7 +325,7 @@ void test_nmru3plru(int (*test_function)(int[], int, int[], int[], int), int *sh
 	*short_succ = 0;
 	*long_succ = 0;
 	int i;
-	
+
 	for(i = 0; i < iterations; i++){
 		*short_succ += test_function(nmru3plru4_evict, nmru3plru4_evict_length, failure_distribution, distribution, 1);
 		*long_succ += !!(test_function(nmru3plru4_noevict, nmru3plru4_noevict_length, failure_distribution, distribution, 0) == 0);
@@ -335,7 +336,7 @@ void test_plru4(int (*test_function)(int[], int, int[], int[], int), int *short_
 	*short_succ = 0;
 	*long_succ = 0;
 	int i;
-	
+
 	for(i = 0; i < iterations; i++){
 		*short_succ += test_function(plru4_evict, plru4_evict_length, failure_distribution, distribution, 1);
 		*long_succ += !!(test_function(plru4_noevict, plru4_noevict_length, failure_distribution, distribution, 0) == 0);
@@ -346,7 +347,7 @@ void test_lru4(int (*test_function)(int[], int, int[], int[], int), int *short_s
 	*short_succ = 0;
 	*long_succ = 0;
 	int i;
-	
+
 	for(i = 0; i < iterations; i++){
 		*short_succ += test_function(lru4_evict, lru4_evict_length, failure_distribution, distribution, 1);
 		*long_succ += !!(test_function(lru4_noevict, lru4_noevict_length, failure_distribution, distribution, 0) == 0);
@@ -357,7 +358,7 @@ void test_plru8(int (*test_function)(int[], int, int[], int[], int), int *short_
 	*short_succ = 0;
 	*long_succ = 0;
 	int i;
-	
+
 	for(i = 0; i < iterations; i++){
 		*short_succ += test_function(plru8_evict, plru8_evict_length, failure_distribution, distribution, 1);
 		*long_succ += !!(test_function(plru8_noevict, plru8_noevict_length, failure_distribution, distribution, 0) == 0);

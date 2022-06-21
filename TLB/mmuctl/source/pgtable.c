@@ -1,5 +1,6 @@
 
 #include <pgtable.h>
+#include "mm_locking.h"
 
 int resolve_va(size_t addr, struct ptwalk *entry, int lock)
 {
@@ -28,7 +29,7 @@ int resolve_va(size_t addr, struct ptwalk *entry, int lock)
 		return -EINVAL;
 
 	if (lock)
-		down_read(&current->mm->mmap_lock);
+		down_read(TLBDR_MMLOCK);
 
 	pgd = pgd_offset(current->mm, addr);
 
@@ -73,13 +74,13 @@ int resolve_va(size_t addr, struct ptwalk *entry, int lock)
 	pte_unmap(pte);
 
 	if (lock)
-		up_read(&current->mm->mmap_lock);
+		up_read(TLBDR_MMLOCK);
 
 	return 0;
 
 err:
 	if (lock)
-		up_read(&current->mm->mmap_lock);
+		up_read(TLBDR_MMLOCK);
 
 	return -1;
 }

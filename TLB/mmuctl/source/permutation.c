@@ -1,6 +1,7 @@
 #include <permutation.h>
 
 #include <linux/vmalloc.h>
+#include "mm_locking.h"
 /*
     This function tests whether accessing sTLB_ways pages in the same sTLB set
     results in all of them being cached in the sTLB.
@@ -10,8 +11,8 @@ int __attribute__((optimize("O0"))) stlb_vector_evicted(volatile struct experime
 
     volatile unsigned int addresses_needed = 3 * info.ways + (info.ways - info.position);
 
-	volatile unsigned long *addrs = vmalloc(sizeof(unsigned long) * addresses_needed);	
-	volatile unsigned long *wash_addr = vmalloc(sizeof(unsigned long) * info.number_of_washings * 2);	
+	volatile unsigned long *addrs = vmalloc(sizeof(unsigned long) * addresses_needed);
+	volatile unsigned long *wash_addr = vmalloc(sizeof(unsigned long) * info.number_of_washings * 2);
 
     volatile struct ptwalk walk;
 
@@ -23,7 +24,7 @@ int __attribute__((optimize("O0"))) stlb_vector_evicted(volatile struct experime
     if(tlb.shared_component->hash_function == XOR){
         get_address_set_stlb_xor(addrs, info.target_stlb_set, info.target_dtlb_set, tlb.shared_component->set_bits, tlb.split_component_data->set_bits, addresses_needed);
         get_address_set_stlb_xor(wash_addr, (info.target_stlb_set + 1) % set_bits_to_sets(tlb.shared_component->set_bits), info.target_dtlb_set, tlb.shared_component->set_bits, tlb.split_component_data->set_bits, info.number_of_washings * 2);
-   
+
         resolve_va(addrs[3 * info.ways - info.element - 1], &walk, 0);
 
         while(compute_lin_set(walk.pte, tlb.shared_component->set_bits) == info.target_stlb_set){
@@ -33,7 +34,7 @@ int __attribute__((optimize("O0"))) stlb_vector_evicted(volatile struct experime
     }else if(tlb.shared_component->hash_function == LIN){
         get_address_set_stlb_lin(addrs, info.target_stlb_set, tlb.shared_component->set_bits, addresses_needed);
         get_address_set_stlb_lin(wash_addr, (info.target_stlb_set + set_bits_to_sets(tlb.split_component_data->set_bits)) % set_bits_to_sets(tlb.shared_component->set_bits), tlb.shared_component->set_bits, info.number_of_washings * 2);
-    
+
         resolve_va(addrs[3 * info.ways - info.element - 1], &walk, 0);
 
         while(compute_xor_set(walk.pte, tlb.shared_component->set_bits) == info.target_stlb_set){
@@ -52,7 +53,7 @@ int __attribute__((optimize("O0"))) stlb_vector_evicted(volatile struct experime
 
     //Set up the pointer chain
     //1. We first warm the sTLB set (2 * sTLB_ways accesses) and access sTLB_ways addresses
-    //2. Then, we wash the dTLB set, so that the entries are only in 
+    //2. Then, we wash the dTLB set, so that the entries are only in
     //the sTLB (info.number_of_washings == 2 * dTLB_ways accesses).
     //3. Then, we touch the entry corresponding to the desired permutation vector
     //4. We have to wash the dTLB set again (2 * dTLB_ways accesses).
@@ -71,7 +72,7 @@ int __attribute__((optimize("O0"))) stlb_vector_evicted(volatile struct experime
     for(info.i = 0; info.i < 3 * info.ways - 1; info.i++){
         write_instruction_chain(addrs[info.i], &info.iteration, addrs[info.i + 1]);
     }
-    
+
     //Washing (2)
     write_instruction_chain(addrs[3 * info.ways - 1], &info.iteration, wash_addr[0]);
 
@@ -105,7 +106,7 @@ int __attribute__((optimize("O0"))) stlb_vector_evicted(volatile struct experime
     vfree(addrs);
     vfree(wash_addr);
 
-    down_write(&current->mm->mmap_lock);	
+    down_write(TLBDR_MMLOCK);
 
     //Walk the pointer chain (it will desync)
     walk_stlb_chain(&info, walk.pte);
@@ -115,7 +116,7 @@ int __attribute__((optimize("O0"))) stlb_vector_evicted(volatile struct experime
     //Restore page table
     switch_pages(walk.pte, walk.pte + 1);
 
-    up_write(&current->mm->mmap_lock);
+    up_write(TLBDR_MMLOCK);
 
     //If not cached anymore, return 1
     return !!(info.curr != info.original);
@@ -133,7 +134,7 @@ int __attribute__((optimize("O0"))) stlb_miss_vector(volatile struct experiment_
     //+25 to allow room for shuffling
     volatile unsigned int addresses_needed = 3 * info.ways + 25;
 
-	volatile unsigned long *addrs = vmalloc(sizeof(unsigned long) * addresses_needed);	
+	volatile unsigned long *addrs = vmalloc(sizeof(unsigned long) * addresses_needed);
 
     //Obtain 3 * sTLB_ways + 25 addresses mapping to the same sTLB set
     if(tlb.shared_component->hash_function == XOR){
@@ -183,20 +184,20 @@ int __attribute__((optimize("O0"))) stlb_miss_vector(volatile struct experiment_
 
     vfree(addrs);
 
-    down_write(&current->mm->mmap_lock);	
+    down_write(TLBDR_MMLOCK);
     claim_cpu();
 
     //Warming the sTLB set
 	for(info.i = 0; info.i < 2 * info.ways; info.i++){
 	    info.p = read_walk(info.p, &info.iteration);
-	} 
+	}
 
     //Prime sTLB_ways entries
     for(info.i = 0; info.i < info.ways; info.i++){
 		info.p = read_walk(info.p, &info.iteration);
         //Desync the TLB
         switch_pages(walks[info.i].pte, walks[info.i].pte + 1);
-	} 
+	}
 
     info.iteration = 2 * info.ways + 1;
 
@@ -215,10 +216,10 @@ int __attribute__((optimize("O0"))) stlb_miss_vector(volatile struct experiment_
     if(!info.p){
         info.original = 0;
     }
- 
+
     give_up_cpu();
 
-    up_write(&current->mm->mmap_lock);
+    up_write(TLBDR_MMLOCK);
 
     setcr3(cr3k);
 
@@ -256,7 +257,7 @@ void __attribute__((optimize("O0"))) detect_stlb_vector(volatile unsigned int ve
         for(i = 0; i < tlb.shared_component->ways; i++){
             all_votes[i] = 0;
         }
-        
+
         for(i = 0; i < iterations; i++){
             volatile unsigned int target_stlb_set = get_stlb_set(set_bits_to_sets(tlb.shared_component->set_bits), 0);
             volatile unsigned int target_dtlb_set = get_dtlb_set(set_bits_to_sets(tlb.split_component_data->set_bits), 0);
@@ -277,7 +278,7 @@ void __attribute__((optimize("O0"))) detect_stlb_vector(volatile unsigned int ve
             }
 
             volatile unsigned int voted = 0;
-            
+
             //Test each possible position in the permutation vector for this entry
             for(position = tlb.shared_component->ways - 1; (position + 1) >= 1; position--){
                 info.position = position;
@@ -327,10 +328,10 @@ void __attribute__((optimize("O0"))) detect_stlb_vector(volatile unsigned int ve
 */
 int __attribute__((optimize("O0"))) dtlb_vector_evicted(volatile struct experiment_info info){
     disable_smep();
-      
+
     volatile unsigned int addresses_needed = 3 * info.ways + info.number_of_washings + (info.ways - info.position);
 
-    volatile unsigned long *addrs = vmalloc(sizeof(unsigned long) * addresses_needed);	
+    volatile unsigned long *addrs = vmalloc(sizeof(unsigned long) * addresses_needed);
 
     //Obtain 4 * sTLB_ways - position + 2 * sTLB_ways (number_of_washings) addresses mapping to the same sTLB and dTLB set
     if(tlb.shared_component->hash_function == XOR){
@@ -370,7 +371,7 @@ int __attribute__((optimize("O0"))) dtlb_vector_evicted(volatile struct experime
     //1. addrs[0] --> addrs[1] --> addrs[3 * dTLB_ways - 1] -->
     //2. addrs[4 * dTLB_ways - position] --> addrs[4 * dTLB_ways - position + 1] --> ... --> addrs[4 * dTLB_ways - position + 2 * sTLB_ways - 1] -->
     //3. addrs[3 * dTLB_ways - vector_index] -->
-    //4. addrs[3 * dTLB_ways] --> addrs[3 * dTLB_ways + 1] --> ... --> addrs[3 * dTLB_ways + position - 1] --> 
+    //4. addrs[3 * dTLB_ways] --> addrs[3 * dTLB_ways + 1] --> ... --> addrs[3 * dTLB_ways + position - 1] -->
     //5. addrs[3 * dTLB_ways - element - 1]
 
     //Warming + getting known state (1)
@@ -403,8 +404,8 @@ int __attribute__((optimize("O0"))) dtlb_vector_evicted(volatile struct experime
 
     vfree(addrs);
 
-    down_write(&current->mm->mmap_lock);	
-	
+    down_write(TLBDR_MMLOCK);
+
     //Walk the pointer chain (it will desync)
     walk_dtlb_chain(&info, walk.pte);
 
@@ -413,7 +414,7 @@ int __attribute__((optimize("O0"))) dtlb_vector_evicted(volatile struct experime
     //Restore page table
     switch_pages(walk.pte, walk.pte + 1);
 
-    up_write(&current->mm->mmap_lock);
+    up_write(TLBDR_MMLOCK);
 
     //If not cached anymore, return 1
     return !!(info.curr != info.original);
@@ -430,7 +431,7 @@ int __attribute__((optimize("O0"))) dtlb_miss_vector(volatile struct experiment_
 
     volatile int addresses_needed = 3 * info.ways + info.number_of_washings;
 
-	volatile unsigned long *addrs = vmalloc(sizeof(unsigned long) * addresses_needed);	
+	volatile unsigned long *addrs = vmalloc(sizeof(unsigned long) * addresses_needed);
 
     //Obtain 3 * dTLB_ways + 2 * sTLB_ways (== number_of_washings) addresses mapping to the same dTLB and sTLB set
     if(tlb.shared_component->hash_function == XOR){
@@ -472,7 +473,7 @@ int __attribute__((optimize("O0"))) dtlb_miss_vector(volatile struct experiment_
     for(info.i = 0; info.i < 2 * info.ways; info.i++){
         write_instruction_chain(addrs[info.i], &info.iteration, addrs[info.i + 1]);
     }
-    
+
     for(info.i = 0; info.i < info.ways; info.i++){
         write_instruction_chain(addrs[2 * info.ways + info.i], &info.iteration, addrs[2 * info.ways + info.i + 1]);
         info.iteration = info.iteration - 1;
@@ -489,25 +490,25 @@ int __attribute__((optimize("O0"))) dtlb_miss_vector(volatile struct experiment_
 
     vfree(addrs);
 
-    down_write(&current->mm->mmap_lock);	
+    down_write(TLBDR_MMLOCK);
     claim_cpu();
 
     //Warming the dTLB set
 	for(info.i = 0; info.i < 2 * info.ways; info.i++){
 	    info.p = read_walk(info.p, &info.iteration);
-	} 
+	}
 
     //Prime dTLB_ways entries
     for(info.i = 0; info.i < info.ways; info.i++){
 		info.p = read_walk(info.p, &info.iteration);
         //Desync the TLB
         switch_pages(walks[info.i].pte, walks[info.i].pte + 1);
-	} 
+	}
 
     //Wash the sTLB set
     for(info.i = 0; info.i < info.number_of_washings; info.i++){
 		info.p = execute_walk(info.p, &info.iteration);
-	} 
+	}
 
     info.iteration = 2 * info.ways + 1;
 
@@ -521,15 +522,15 @@ int __attribute__((optimize("O0"))) dtlb_miss_vector(volatile struct experiment_
 
         //Restore page table
         switch_pages(walks[info.i].pte, walks[info.i].pte + 1);
-	} 
+	}
 
     if(!info.p){
         info.original = 0;
     }
- 
+
     give_up_cpu();
 
-    up_write(&current->mm->mmap_lock);
+    up_write(TLBDR_MMLOCK);
 
     setcr3(cr3k);
 
@@ -567,7 +568,7 @@ void __attribute__((optimize("O0"))) detect_dtlb_vector(volatile unsigned int ve
         for(i = 0; i < tlb.split_component_data->ways; i++){
             all_votes[i] = 0;
         }
-        
+
         for(i = 0; i < iterations; i++){
             volatile unsigned int target_stlb_set = get_stlb_set(set_bits_to_sets(tlb.shared_component->set_bits), 0);
             volatile unsigned int target_dtlb_set = get_dtlb_set(set_bits_to_sets(tlb.split_component_data->set_bits), 0);
@@ -588,7 +589,7 @@ void __attribute__((optimize("O0"))) detect_dtlb_vector(volatile unsigned int ve
             }
 
             volatile unsigned int voted = 0;
-            
+
             //Test each possible position in the permutation vector for this entry
             for(position = tlb.split_component_data->ways - 1; (position + 1) >= 1; position--){
                 info.position = position;
@@ -641,7 +642,7 @@ int __attribute__((optimize("O0"))) itlb_vector_evicted(volatile struct experime
 
     volatile unsigned int addresses_needed = 3 * info.ways + info.number_of_washings + (info.ways - info.position);
 
-    volatile unsigned long *addrs = vmalloc(sizeof(unsigned long) * addresses_needed);	
+    volatile unsigned long *addrs = vmalloc(sizeof(unsigned long) * addresses_needed);
 
     //Obtain 4 * sTLB_ways - position + 2 * sTLB_ways (number_of_washings) addresses mapping to the same sTLB and iTLB set
     if(tlb.shared_component->hash_function == XOR){
@@ -675,7 +676,7 @@ int __attribute__((optimize("O0"))) itlb_vector_evicted(volatile struct experime
     //1. addrs[0] --> addrs[1] --> addrs[3 * iTLB_ways - 1] -->
     //2. addrs[4 * dTLB_ways - position] --> addrs[4 * dTLB_ways - position + 1] --> ... --> addrs[4 * dTLB_ways - position + 2 * sTLB_ways - 1] -->
     //3. addrs[3 * dTLB_ways - vector_index] -->
-    //4. addrs[3 * dTLB_ways] --> addrs[3 * dTLB_ways + 1] --> ... --> addrs[3 * dTLB_ways + position - 1] --> 
+    //4. addrs[3 * dTLB_ways] --> addrs[3 * dTLB_ways + 1] --> ... --> addrs[3 * dTLB_ways + position - 1] -->
     //5. addrs[3 * dTLB_ways - element - 1]
 
     //Warming + getting known state (1)
@@ -708,7 +709,7 @@ int __attribute__((optimize("O0"))) itlb_vector_evicted(volatile struct experime
 
     vfree(addrs);
 
-    down_write(&current->mm->mmap_lock);	
+    down_write(TLBDR_MMLOCK);
 
     //Walk the pointer chain (it will desync)
     walk_itlb_chain(&info, walk.pte);
@@ -718,7 +719,7 @@ int __attribute__((optimize("O0"))) itlb_vector_evicted(volatile struct experime
     //Restore page table
     switch_pages(walk.pte, walk.pte + 1);
 
-    up_write(&current->mm->mmap_lock);
+    up_write(TLBDR_MMLOCK);
 
     //If not cached anymore, return 1
     return !!(info.curr != info.original);
@@ -735,7 +736,7 @@ int __attribute__((optimize("O0"))) itlb_miss_vector(volatile struct experiment_
 
     volatile unsigned int addresses_needed = 3 * info.ways + info.number_of_washings;
 
-	volatile unsigned long *addrs = vmalloc(sizeof(unsigned long) * addresses_needed);	
+	volatile unsigned long *addrs = vmalloc(sizeof(unsigned long) * addresses_needed);
 
     //Obtain 3 * iTLB_ways + 2 * sTLB_ways (== number_of_washings) addresses mapping to the same iTLB and sTLB set
     if(tlb.shared_component->hash_function == XOR){
@@ -768,7 +769,7 @@ int __attribute__((optimize("O0"))) itlb_miss_vector(volatile struct experiment_
     for(info.i = 0; info.i < 2 * info.ways; info.i++){
         write_instruction_chain(addrs[info.i], &info.iteration, addrs[info.i + 1]);
     }
-    
+
     for(info.i = 0; info.i < info.ways; info.i++){
         write_instruction_chain(addrs[2 * info.ways + info.i], &info.iteration, addrs[2 * info.ways + info.i + 1]);
         info.iteration = info.iteration - 1;
@@ -785,25 +786,25 @@ int __attribute__((optimize("O0"))) itlb_miss_vector(volatile struct experiment_
 
     vfree(addrs);
 
-    down_write(&current->mm->mmap_lock);	
+    down_write(TLBDR_MMLOCK);
     claim_cpu();
 
     //Warming the iTLB set
 	for(info.i = 0; info.i < 2 * info.ways; info.i++){
 	    info.p = execute_walk(info.p, &info.iteration);
-	} 
+	}
 
     //Prime iTLB_ways entries
     for(info.i = 0; info.i < info.ways; info.i++){
 		info.p = execute_walk(info.p, &info.iteration);
         //Desync the TLB
         switch_pages(walks[info.i].pte, walks[info.i].pte + 1);
-	} 
+	}
 
     //Wash the sTLB set
     for(info.i = 0; info.i < info.number_of_washings; info.i++){
 		info.p = read_walk(info.p, &info.iteration);
-	} 
+	}
 
     info.iteration = 2 * info.ways + 1;
 
@@ -817,15 +818,15 @@ int __attribute__((optimize("O0"))) itlb_miss_vector(volatile struct experiment_
 
         //Restore page table
         switch_pages(walks[info.i].pte, walks[info.i].pte + 1);
-	} 
+	}
 
     if(!info.p){
         info.original = 0;
     }
- 
+
     give_up_cpu();
 
-    up_write(&current->mm->mmap_lock);
+    up_write(TLBDR_MMLOCK);
 
     setcr3(cr3k);
 
@@ -863,7 +864,7 @@ void __attribute__((optimize("O0"))) detect_itlb_vector(volatile unsigned int ve
         for(i = 0; i < tlb.split_component_instruction->ways; i++){
             all_votes[i] = 0;
         }
-        
+
         for(i = 0; i < iterations; i++){
             volatile unsigned int target_stlb_set = get_stlb_set(set_bits_to_sets(tlb.shared_component->set_bits), 0);
             volatile unsigned int target_itlb_set = get_itlb_set(set_bits_to_sets(tlb.split_component_instruction->set_bits), 0);
@@ -884,7 +885,7 @@ void __attribute__((optimize("O0"))) detect_itlb_vector(volatile unsigned int ve
             }
 
             volatile unsigned int voted = 0;
-            
+
             //Test each possible position in the permutation vector for this entry
             for(position = tlb.split_component_instruction->ways - 1; (position + 1) >= 1; position--){
                 info.position = position;
