@@ -1202,7 +1202,7 @@ int main(int argc, char *argv[])
 	c1head = cache_prepnotlb(cebuf, (uintptr_t)pmds[t1], (uintptr_t)t1p, (uintptr_t)t2p);
 	c2head = cache_prepnotlb(cebuf, (uintptr_t)pmds[t2], (uintptr_t)t1p, (uintptr_t)t2p);
 
-#if 1
+#ifndef NOSANITY
 // Sanity checks, disable for faster testing
 	fputc('\n', stderr);
 	fputs("Normal timing run\n", stderr);

@@ -1,12 +1,10 @@
-CFLAGS := -O2
-
 all: mmuctl/mmuctl.ko mmuctl/libmmuctl.so ptham
 
 mmuctl/mmuctl.ko mmuctl/libmmuctl.so &: mmuctl/
 	cd $< && $(MAKE)
 
 ptham: ptham.c xbs.h
-	$(CC) -o $@ -Immuctl/include -O2 -W -Lmmuctl -lmmuctl $<
+	$(CC) -o $@ -Immuctl/include -g -march=skylake -O2 -W -Lmmuctl -lmmuctl ${CFLAGS} $<
 
 .PHONY: clean run
 

@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 # TWEAKABLES
 RESDIR = 'results'
 
-HISTGLOB = f'{RESDIR}/r4.*.tct'
+HISTGLOB = f'{RESDIR}/r*.tct'
 COMPFN = f'{RESDIR}/r4.3.tct'
 COMPRUN = 0
 
