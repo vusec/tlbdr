@@ -1,4 +1,4 @@
-# TLB
+# TLB - AMD
 
 This tool detects TLB properties such as its layout and hash functions for TLBs without a shared L2 TLB / sTLB, such as AMD TLBs.
 

@@ -143,7 +143,6 @@ char read_response(){
 	Parses the user-provided arguments.
 	Results are stored in global variables.
 */
-
 int read_args(int argc, char *argv[], int fd){	
     int opt, option_index;
     static struct option long_options[] = {
@@ -232,7 +231,7 @@ int read_args(int argc, char *argv[], int fd){
 	
 int main(int argc, char *argv[]){ 
 	int fd = open("/dev/mmuctl", O_RDONLY);
-	read(fd, NULL, 49);
+	read(fd, NULL, RESET_SETTINGS);
 
 	//Find how many cores we have
 	set_number_of_cores(); 

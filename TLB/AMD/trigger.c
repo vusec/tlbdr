@@ -1,21 +1,19 @@
 #define _GNU_SOURCE
 #include <stdint.h>
 #include <stdio.h>
-
 #include <time.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/mman.h>
-
 #include <stdlib.h>
-
 #include <sched.h>
-#include "settings.h"
 #include <getopt.h>
+#include "settings.h"
 
 #define BUF_LENGTH (100)
-#define NUMBER_OF_TESTS (19)
+#define NUMBER_OF_TESTS (4)
 
+//All tests to be executed
 int tests[NUMBER_OF_TESTS] = {SHARED, DTLB_BITS, ITLB_BITS, INCLUSIVITY};
 
 int pinned_core = 0;
@@ -24,6 +22,9 @@ int disable_hyper = 1;
 int stress = 0;
 int test = 0;
 
+/*
+	Disables a given logical core.
+*/
 void disable_core(unsigned int core){
 	FILE *fp;
 	char buf[BUF_LENGTH];
@@ -34,6 +35,9 @@ void disable_core(unsigned int core){
 	fclose(fp);
 }
 
+/*
+	Enables a given logical core.
+*/
 void enable_core(unsigned int core){
 	FILE *fp;
 	char buf[BUF_LENGTH];
@@ -44,6 +48,9 @@ void enable_core(unsigned int core){
 	fclose(fp);
 }
 
+/*
+	Returns the physical core of the given logical core.
+*/
 int get_phys_core(unsigned int core){
 	FILE *fp;
 	unsigned int phys_core;
@@ -57,6 +64,9 @@ int get_phys_core(unsigned int core){
 	return phys_core;
 }
 
+/*
+	Enables all cores.
+*/
 void enable_hyperthreading(){ 
 	int core;
 	
@@ -65,6 +75,10 @@ void enable_hyperthreading(){
 	}
 }
 
+/*
+	Finds the numbre of cores and stores this in 
+	the variable 'number_of_cores.
+*/
 void set_number_of_cores(){
 	FILE *fp;
 	char buf[BUF_LENGTH];
@@ -81,6 +95,9 @@ void set_number_of_cores(){
 	}
 }
 
+/*
+	Returns the co-resident logical core of the given logical core.
+*/
 int get_co_resident(unsigned long co_core){
 	FILE *fp;
 	char buf[BUF_LENGTH];
@@ -108,30 +125,6 @@ int get_co_resident(unsigned long co_core){
 	return -1;
 }
 
-void disable_hyperthreading(){
-	int core;
-
-	for(core = 1; core < number_of_cores; core++){
-		int phys_core = get_phys_core(core);
-
-		if(core == phys_core){
-			enable_core(core);
-		}else{
-			disable_core(core);
-		}
-	} 
-}
-
-void disable_all(){
-	FILE *fp;
-	char buf[BUF_LENGTH];
-	int core;
-
-	for(core = 1; core < number_of_cores; core++){
-		disable_core(core);
-	} 
-}
-
 void remove_line_above(){
 	printf("\033[A\33[2K\r");
 }
@@ -146,13 +139,14 @@ char read_response(){
 	return res;
 }
 
+/*
+	Parses the user-provided arguments.
+	Results are stored in global variables.
+*/
 int read_args(int argc, char *argv[], int fd){	
     int opt, option_index;
     static struct option long_options[] = {
-		{"set-distribution",  no_argument, 0, 'f'},
-		{"sequence",  no_argument, 0, 'c'},
 		{"iterations",  required_argument, 0, 'n'},
-		{"stlb-set",  required_argument, 0, 's'},
 		{"itlb-set",  required_argument, 0, 'i'},
 		{"dtlb-set",  required_argument, 0, 'd'},
 		{"stress",  no_argument, 0, 't'},
@@ -172,17 +166,6 @@ int read_args(int argc, char *argv[], int fd){
 
 				read(fd, NULL, START_ITERATIONS + atoi(optarg));
 				break;
-			case 'f':
-				read(fd, NULL, ENABLE_SET_DISTRIBUTION);
-				break;
-			case 's':
-				if(atoi(optarg) < 0 || atoi(optarg) > (END_PREFERRED_STLB_SET - START_PREFERRED_STLB_SET - 1)){
-					printf("Invalid chosen set\n");
-					return 1;
-				}
-
-				read(fd, NULL, START_PREFERRED_STLB_SET + atoi(optarg));
-				break;
 			case 'i':
 				if(atoi(optarg) < 0 || atoi(optarg) > (END_PREFERRED_ITLB_SET - START_PREFERRED_ITLB_SET - 1)){
 					printf("Invalid chosen set\n");
@@ -198,9 +181,6 @@ int read_args(int argc, char *argv[], int fd){
 				}
 
 				read(fd, NULL, START_PREFERRED_DTLB_SET + atoi(optarg));
-				break;
-			case 'c':
-				read(fd, NULL, ENABLE_SEQUENCE);
 				break;
 			case 't':
 				disable_hyper = 0;
@@ -232,12 +212,14 @@ int read_args(int argc, char *argv[], int fd){
 	}
 }
 	
-int main(int argc, char *argv[]) 
-{ 
+int main(int argc, char *argv[]){ 
 	int fd = open("/dev/mmuctl", O_RDONLY);
-	read(fd, NULL, 49);
+	read(fd, NULL, RESET_SETTINGS);
 
+	//Find how many cores we have
 	set_number_of_cores(); 
+
+	//Enable all cores
 	enable_hyperthreading();
 
 	if(read_args(argc, argv, fd) == 1){
@@ -246,9 +228,13 @@ int main(int argc, char *argv[])
 
 	const int BUF_PROT = PROT_READ|PROT_WRITE|PROT_EXEC;
 
+	//We want 2^FREEDOM_OF_BITS virtual pages
 	unsigned long number_of_pages = pow(2, FREEDOM_OF_BITS);
+
+	//We want 2^UNIQUE_BITS physical pages
 	unsigned long unique_pages = pow(2, UNIQUE_BITS);
  
+ 	//Maps all virtual pages to the set of physical pages
 	int fd_shm = shm_open("/example_shm", O_RDWR | O_CREAT, 0777);
 	ftruncate(fd_shm, PAGE_SIZE * unique_pages);
 	int i;
@@ -260,6 +246,8 @@ int main(int argc, char *argv[])
 		}
 	}
  
+ 	//Write an identifier to each unique physcial page
+	//The identifier will be returned when this code is executed
 	volatile unsigned char *p1;
 	for(i = 0; i < unique_pages; i++){
 		p1 = BASE + (4096 * i);
@@ -275,6 +263,7 @@ int main(int argc, char *argv[])
 		return 0;
 	}
 
+	//Pin process to a core
 	cpu_set_t mask;
 	CPU_ZERO(&mask);
 	CPU_SET(pinned_core, &mask);
@@ -285,6 +274,7 @@ int main(int argc, char *argv[])
 
 	int coresident = get_co_resident(pinned_core);
 
+	//Disable co-resident core
 	if(disable_hyper){
 		if(coresident != -1){
 			disable_core(coresident);
@@ -295,6 +285,7 @@ int main(int argc, char *argv[])
 		
 	}
 
+	//Enables stress on co-resident core
 	if(stress){
 		if(fork() == 0){			
 			if(coresident == -1){
@@ -313,14 +304,17 @@ int main(int argc, char *argv[])
 		for(p = 0; p < 10000; p++){}
 	}
 
+	//Prepare buffer for experiment results
 	char *msg = malloc(sizeof(char) * MESSAGE_BUFFER_SIZE); 
 
+	//If test given as argument, perform that test
 	if(test != 0){
 		printf("Testing, please wait a moment...\n");
 		read(fd, msg, test - 1);
 		remove_line_above();
 		printf("%d. %s\n", test, msg);
 	}else{
+		//Perform all tests
 		for(i = 0; i < 4; i++){
 			printf("Testing, please wait a moment...\n");
 			read(fd, msg, tests[i]);
