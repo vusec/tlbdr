@@ -9,8 +9,6 @@
 #include <linux/module.h>
 #include <linux/syscalls.h>
 #include <linux/version.h>
-#include <ioctl.h>
-#include <mmuctl.h>
 #include <linux/delay.h>
 #include <linux/random.h>
 #include <linux/kthread.h>
@@ -24,6 +22,12 @@ MODULE_LICENSE("GPL");
 /* IMPORTANT: define the two logical cores here that are sharing the TLB*/
 #define CORE1 0
 #define CORE2 2
+
+#define MMUCTL_PGD (1 << 0)
+#define MMUCTL_P4D (1 << 1)
+#define MMUCTL_PUD (1 << 2)
+#define MMUCTL_PMD (1 << 3)
+#define MMUCTL_PTE (1 << 4)
 
 struct ptwalk {
 	int pid;

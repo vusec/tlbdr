@@ -3,6 +3,10 @@
 This tool detects whether PCID slots are shared between hyperthreads.
 
 ## Running
+Before building and running, you need to configure the cores in ./mmuctl/source/kmod.c.
+To test properly, the macros CORE1 and CORE2 have to be set to logical cores that are co-resident, i.e.
+they are on the same physical core and share the TLB.
+
 To build, run
 
 ```

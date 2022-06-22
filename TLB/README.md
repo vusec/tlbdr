@@ -1,6 +1,8 @@
 # TLB
 
 This tool detects TLB properties such as its layout, its hash functions and its replacement policies.
+For TLBs without a shared L2/sTLB, such as AMD Zen and AMD Zen 3, the tool in ./AMD can be used.
+To test whether PCID entries are shared across hyperthreads, the tool in ./PCID can be used.
 
 ## Running
 To build, run
