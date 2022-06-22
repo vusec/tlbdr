@@ -61,6 +61,11 @@ int detect_bits_itlb(int set_bits, int bit, int ways){
 	volatile struct ptwalk walks[ways];
 	volatile int values[ways];
 
+	for(i = 0; i < 300; i++){
+			resolve_va(addrs[i], &walks[0], 0);
+			clear_nx(walks[0].pgd);
+	}
+
 	for(i = 0; i < ways; i++){
 			resolve_va(addrs[i + 300], &walks[i], 0);
 			clear_nx(walks[i].pgd);
