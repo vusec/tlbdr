@@ -29,7 +29,7 @@ make test
 In case you don't have the prerequisites installed, you can run
 
 ```
-./prepare
+./prepare.sh
 ```
 
 to install them.

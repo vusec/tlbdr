@@ -1,8 +1,0 @@
-This kernel module allows you to access the entire physical address space and
-the paging structures up to the point of full modification. Furthermore, this
-module allows you to configure the PAT in order to mark certain memory regions
-with specific memory types.
-
-Use this kernel module with caution as it provides access to the entire
-physical address space and the paging structures of your system without the
-need for root.
