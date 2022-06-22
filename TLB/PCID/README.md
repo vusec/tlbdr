@@ -1,6 +1,6 @@
 # TLB - PCID
 
-This tool detects whether PCID slots are shared between hyperthreads.
+This tool detects whether PCID slots are shared between hyperthreads. This work is part of [TLB;DR](https://vusec.net/tlbdr).
 
 ## Running
 Before building and running, you need to configure the cores in `./mmuctl/source/kmod.c`.
