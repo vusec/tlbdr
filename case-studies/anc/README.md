@@ -15,6 +15,7 @@ This work is part of [TLB;DR](https://vusec.net/projects/tlbdr).
 
 ## How to
 ### Reproduce results
+(exec time: ~ 1 hour by default, tweakable via `NMEAS` and `NRUNS`)
 1. Ensure you are running on an Intel Kaby Lake (model number 7XXX) CPU, and have git, a C compiler, Python 3, numpy, and matplotlib installed.
 1. Run `measure.sh` which will produce `anc-naive-10.txt` and `anc-ninja-10.txt`.
 	- (optional) examine output files by hand

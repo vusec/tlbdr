@@ -17,6 +17,7 @@ This work is part of [TLB;DR](https://vusec.net/projects/tlbdr).
 1. Run `make`
 
 ### Run
+(exec time: ~ 10 min)
 1. Ensure you have Python 3 installed and a writable `/tmp/` directory
 	- (optional) review the constants at the start of `run.sh`
 1. Allocate at least one 1GiB hugepage via hugetlbfs
